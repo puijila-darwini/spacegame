@@ -1,10 +1,10 @@
 """sim -> renderer contract v3: snapshot(t) the web canvas just draws.
 
 Shape:
-{v:3, t, credits, bodies:[{id,parent,a,angle,x,y}],
+{v:3, t, credits, bodies:[{id,parent,a,period,angle,x,y}],
  ships:[{id,at,loc,loc_to,leg,x,y,progress,eta_d,arc_pts,cargo,cargo_cap,dv,dv_cap}],
  ports:{port_id:{asks,bids,last}}, ledger:[...],
- locations:[{id,name,body,kind,depart_dv,arrive_dv,service,x,y,orbit_a,orbit_angle}],
+ locations:[{id,name,body,kind,depart_dv,arrive_dv,service,x,y,orbit_a,orbit_period,orbit_angle}],
  contacts:[{id,name,port,occupation,reliability,rapport}],
  known:{port_id:[parties]},
  contracts:[{id,issuer,port,dest,comm,qty,delivered,price,deadline,status,known}]}
@@ -108,8 +108,10 @@ def snapshot(game: Game) -> dict:
     bodies = []
     for b in game.bodies.values():
         x, y, th = orbits.body_pos(b, game.bodies, game.t)
+        mu = orbits.MU_BY_PARENT.get(b.parent, orbits.MU_SUN) if b.parent else orbits.MU_SUN
+        period = orbits.period(b.a, mu) if b.a > 0 else 0.0
         bodies.append({
-            "id": b.id, "parent": b.parent, "a": b.a,
+            "id": b.id, "parent": b.parent, "a": b.a, "period": period,
             "angle": round(th, 4), "x": round(x, 4), "y": round(y, 4),
         })
     ships = []
@@ -155,11 +157,13 @@ def snapshot(game: Game) -> dict:
     locations = []
     for loc in game.locations.values():
         lx, ly, orbit_a, orbit_angle = _location_pos(game, loc)
+        orbit_period = 0.0 if loc["kind"] == "surface" else LOCATION_ORBITS[loc["kind"]][1]
         locations.append({"id": loc["id"], "name": loc["name"], "body": loc["body"],
                           "kind": loc["kind"], "depart_dv": loc["depart_dv"],
                           "arrive_dv": loc["arrive_dv"], "service": loc["service"],
                           "x": round(lx, 6), "y": round(ly, 6),
-                          "orbit_a": orbit_a, "orbit_angle": round(orbit_angle, 6)})
+                          "orbit_a": orbit_a, "orbit_period": orbit_period,
+                          "orbit_angle": round(orbit_angle, 6)})
     return {"v": SNAPSHOT_VERSION, "t": round(game.t, 2), "credits": round(game.credits, 2),
             "bodies": bodies, "ships": ships, "ports": ports, "ledger": ledger,
             "locations": locations,

@@ -124,7 +124,13 @@
   <button class="btn ghost" id="reset">Reset game</button>
   <button class="btn ghost" id="view-system">System view</button>
   <button class="btn ghost" id="view-reset">Reset view</button>
+  <label class="mini" for="frame-mode">frame</label>
+  <select id="frame-mode" aria-label="Reference frame">
+    <option value="inertial">Heliocentric inertial</option>
+    <option value="follow">Follow selected world</option>
+  </select>
   <span class="chip" id="chip-view">view 1.0×</span>
+  <span class="chip" id="chip-frame">frame: heliocentric</span>
   <span class="chip" id="chip-mode">file mode</span>
   <span class="chip" id="chip-t">t = —</span>
   <span class="chip" id="chip-cr">— cr</span>
@@ -168,13 +174,22 @@
 let SNAP = null, LIVE = false, PREVIEW = "", QUOTE = "", AUTO_ENABLED = false;
 const sel = { body: "tide", ship: "pc1", port: "tide", location: null };
 const view = { x: 0, y: 0, zoom: 1 };
+let frameMode = "inertial";
 const STRAW = "#F2E6A6", ROYAL = "#6B3FA0";
 const cv = document.getElementById("sys"), ctx = cv.getContext("2d");
 const W = cv.width, H = cv.height, CX = W / 2, CY = H / 2;
 const BASE_SCALE = Math.min(W, H) / 2 / 9.9; // MUD-literal radii: Fulmaior rides at 9.43
 const scale = () => BASE_SCALE * view.zoom;
-const px = x => CX + (x - view.x) * scale();
-const py = y => CY - (y - view.y) * scale();
+function frameOrigin(){
+  const scene = DRAW_SNAP || SNAP;
+  if(frameMode === "follow" && scene && sel.body){
+    const body = scene.bodies.find(b => b.id === sel.body);
+    if(body) return {x:body.x, y:body.y, label:`${body.id}-local`};
+  }
+  return {x:0, y:0, label:"heliocentric"};
+}
+const px = x => { const o = frameOrigin(); return CX + (x - o.x - view.x) * scale(); };
+const py = y => { const o = frameOrigin(); return CY - (y - o.y - view.y) * scale(); };
 let hitmap = [];
 let DRAW_SNAP = null, transition = null;
 let gesture = null;
@@ -183,8 +198,13 @@ const pointers = new Map();
 function updateViewChip(){
   const chip = document.getElementById("chip-view");
   if(chip) chip.textContent = `view ${view.zoom.toFixed(1)}×`;
+  const frameChip = document.getElementById("chip-frame");
+  if(frameChip) frameChip.textContent = `frame: ${frameOrigin().label}`;
 }
 function resetView(){
+  frameMode = "inertial";
+  const frameSelect = document.getElementById("frame-mode");
+  if(frameSelect) frameSelect.value = frameMode;
   view.x = 0; view.y = 0; view.zoom = 1;
   updateViewChip(); draw();
 }
@@ -193,12 +213,13 @@ function zoomAt(clientX, clientY, factor){
   const mx = (clientX - r.left) * (W / r.width);
   const my = (clientY - r.top) * (H / r.height);
   const oldScale = scale();
-  const wx = (mx - CX) / oldScale + view.x;
-  const wy = (CY - my) / oldScale + view.y;
+  const origin = frameOrigin();
+  const wx = (mx - CX) / oldScale + view.x + origin.x;
+  const wy = (CY - my) / oldScale + view.y + origin.y;
   view.zoom = Math.max(0.35, Math.min(250, view.zoom * factor));
   const newScale = scale();
-  view.x = wx - (mx - CX) / newScale;
-  view.y = wy - (CY - my) / newScale;
+  view.x = wx - (mx - CX) / newScale - origin.x;
+  view.y = wy - (CY - my) / newScale - origin.y;
   updateViewChip(); draw();
 }
 function canvasPoint(e){
@@ -231,28 +252,56 @@ function pointOnArc(points, progress){
 }
 function blendSnapshots(from, to, fraction){
   const lerp = (a, b) => a + (b - a) * fraction;
+  const angleLerp = (a, b) => {
+    if(!Number.isFinite(a) || !Number.isFinite(b)) return b;
+    const delta = ((b - a + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+    return a + delta * fraction;
+  };
+  const orbitAngle = (oldAngle, newAngle, period, elapsed) =>
+    period > 0 && elapsed > 0 ? oldAngle + fraction * elapsed / period * Math.PI * 2 : angleLerp(oldAngle, newAngle);
   const index = rows => new Map(rows.map(row => [row.id, row]));
   const fromBodies = index(from.bodies || []), fromShips = index(from.ships || []);
   const fromLocations = index(from.locations || []);
+  const elapsed = (Number.isFinite(to.t) && Number.isFinite(from.t)) ? to.t - from.t : 0;
   const blended = {...to};
-  blended.bodies = (to.bodies || []).map(body => {
+  const bodyMap = new Map((to.bodies || []).map(body => [body.id, {...body}]));
+  for(const body of to.bodies || []){
+    if(body.parent) continue;
     const old = fromBodies.get(body.id);
-    return old ? {...body, x:lerp(old.x, body.x), y:lerp(old.y, body.y),
-      angle:lerp(old.angle, body.angle)} : body;
-  });
+    const angle = old ? orbitAngle(old.angle, body.angle, body.period || old.period, elapsed) : body.angle;
+    const row = bodyMap.get(body.id);
+    row.angle = angle;
+    row.x = (body.a || 0) * Math.cos(angle);
+    row.y = (body.a || 0) * Math.sin(angle);
+  }
+  for(const body of to.bodies || []){
+    if(!body.parent) continue;
+    const old = fromBodies.get(body.id), parent = bodyMap.get(body.parent);
+    const angle = old ? orbitAngle(old.angle, body.angle, body.period || old.period, elapsed) : body.angle;
+    const row = bodyMap.get(body.id);
+    row.angle = angle;
+    row.x = (parent ? parent.x : 0) + (body.a || 0) * Math.cos(angle);
+    row.y = (parent ? parent.y : 0) + (body.a || 0) * Math.sin(angle);
+  }
+  blended.bodies = (to.bodies || []).map(body => bodyMap.get(body.id));
   blended.ships = (to.ships || []).map(ship => {
     const old = fromShips.get(ship.id);
     if(!old) return ship;
     const progress = lerp(old.progress, ship.progress);
     const sameLeg = ship.leg && old.leg && ship.leg.from === old.leg.from && ship.leg.to === old.leg.to;
     const arcPoint = sameLeg ? pointOnArc(ship.arc_pts, progress) : null;
-    return {...ship, x:arcPoint ? arcPoint[0] : lerp(old.x, ship.x),
-      y:arcPoint ? arcPoint[1] : lerp(old.y, ship.y), progress, eta_d:lerp(old.eta_d, ship.eta_d)};
+    const parent = !ship.leg && ship.at ? bodyMap.get(ship.at) : null;
+    return {...ship, x:parent ? parent.x : arcPoint ? arcPoint[0] : lerp(old.x, ship.x),
+      y:parent ? parent.y : arcPoint ? arcPoint[1] : lerp(old.y, ship.y),
+      progress, eta_d:lerp(old.eta_d, ship.eta_d)};
   });
   blended.locations = (to.locations || []).map(loc => {
-    const old = fromLocations.get(loc.id);
-    return old ? {...loc, x:lerp(old.x, loc.x), y:lerp(old.y, loc.y),
-      orbit_angle:lerp(old.orbit_angle, loc.orbit_angle)} : loc;
+    const old = fromLocations.get(loc.id), parent = bodyMap.get(loc.body);
+    const angle = old ? orbitAngle(old.orbit_angle, loc.orbit_angle, loc.orbit_period || old.orbit_period, elapsed) : loc.orbit_angle;
+    const orbitA = loc.orbit_a || 0;
+    return {...loc, orbit_angle:angle,
+      x:(parent ? parent.x : 0) + orbitA * Math.cos(angle),
+      y:(parent ? parent.y : 0) + orbitA * Math.sin(angle)};
   });
   return blended;
 }
@@ -353,7 +402,8 @@ document.getElementById("reset").onclick = async () => {
   await act("reset", {});
 };
 document.getElementById("view-reset").onclick = resetView;
-document.getElementById("view-system").onclick = focusSelection;
+document.getElementById("view-system").onclick = enterSystemView;
+document.getElementById("frame-mode").onchange = e => setFrameMode(e.target.value);
 document.getElementById("file").onchange = e => { if(e.target.files[0]) loadFile(e.target.files[0]); };
 window.addEventListener("dragover", e => e.preventDefault());
 window.addEventListener("drop", e => { e.preventDefault(); if(e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]); });
@@ -408,11 +458,25 @@ function focusSelection(){
   const ship = SNAP.ships.find(s => s.id === sel.ship);
   const target = loc || body || ship;
   if(!target) return;
-  view.x = target.x; view.y = target.y;
+  const origin = frameOrigin();
+  view.x = frameMode === "follow" ? target.x - origin.x : target.x;
+  view.y = frameMode === "follow" ? target.y - origin.y : target.y;
   const focusZoom = loc ? 160 : body && body.id === "sun" ? 40 :
     body && body.parent ? 120 : 100;
   view.zoom = Math.max(view.zoom, focusZoom);
   updateViewChip(); draw();
+}
+function enterSystemView(){
+  frameMode = "follow";
+  document.getElementById("frame-mode").value = frameMode;
+  focusSelection();
+}
+function setFrameMode(mode){
+  frameMode = mode;
+  const frameSelect = document.getElementById("frame-mode");
+  if(frameSelect) frameSelect.value = mode;
+  if(mode === "follow") focusSelection();
+  else { view.x = 0; view.y = 0; view.zoom = 1; updateViewChip(); draw(); }
 }
 cv.addEventListener("pointerdown", e => {
   if(!SNAP) return;
@@ -467,7 +531,7 @@ cv.addEventListener("wheel", e => {
 }, {passive:false});
 cv.addEventListener("dblclick", e => {
   const hit = pickAt(e);
-  if(hit){ selectHit(hit); focusSelection(); }
+  if(hit){ selectHit(hit); enterSystemView(); }
 });
 window.addEventListener("keydown", e => {
   if(["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
@@ -476,7 +540,7 @@ window.addEventListener("keydown", e => {
     const r = cv.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1.2);
   } else if(e.key === "-"){
     const r = cv.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1 / 1.2);
-  } else if(e.key.toLowerCase() === "f") focusSelection();
+  } else if(e.key.toLowerCase() === "f") enterSystemView();
 });
 
 function bodyById(id){ return SNAP.bodies.find(b => b.id === id); }
@@ -608,6 +672,9 @@ function draw(){
     ctx.fillText(tag, X + 9, Y - 8);
     hitmap.push({kind:"ship", id:s.id, x:X, y:Y, r:12});
   }
+  const frame = frameOrigin();
+  ctx.fillStyle = "rgba(242,230,166,.78)"; ctx.font = "bold 10px sans-serif"; ctx.textAlign = "left";
+  ctx.fillText(`FRAME · ${frame.label.toUpperCase()}`, 12, H - 14);
   updateViewChip();
   SNAP = authoritative;
 }

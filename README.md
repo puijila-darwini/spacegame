@@ -24,8 +24,9 @@ The system view is a camera-based canvas:
 - use the wheel or a pinch gesture to zoom around the pointer;
 - click a world or ship to select it;
 - double-click a world to enter its full local system view (`100×–160×` depending on the world);
-- use **System view** or `F` to focus the selected world;
-- press `0` to reset the view, `+`/`-` to zoom, and `F` to focus the selection;
+- use **System view** or `F` to focus the selected world in its co-moving local frame;
+- use the frame selector to switch between heliocentric inertial coordinates and following the selected world;
+- press `0` to reset the view and `+`/`-` to zoom; `F` enters the selected world's local system frame;
 - when the selected ship is parked, select another world and use **Plan selected orbit** or the destination selector to plot and commit a transfer;
 - use `+30d` for a month jump, or **Auto 1d/min** to let the live server advance one day per real minute; the same button pauses it.
 

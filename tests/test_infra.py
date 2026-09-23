@@ -147,11 +147,11 @@ def test_snapshot_v3():
     assert ship["loc"] == "tide-surface" and ship["dv"] == ship["dv_cap"] == 0.25
     station = next(loc for loc in s["locations"] if loc["id"] == "tern-station")
     tern = next(body for body in s["bodies"] if body["id"] == "tern")
-    assert station["orbit_a"] > 0
+    assert station["orbit_a"] > 0 and station["orbit_period"] > 0
     assert abs(math.hypot(station["x"] - tern["x"], station["y"] - tern["y"])
                - station["orbit_a"]) < 1e-5
     surface = next(loc for loc in s["locations"] if loc["id"] == "tide-surface")
-    assert surface["orbit_a"] == 0.0
+    assert surface["orbit_a"] == 0.0 and surface["orbit_period"] == 0.0
 
 
 def test_fulmaior_moon_departure():
