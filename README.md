@@ -29,7 +29,7 @@ The system view is a camera-based canvas:
 - use the frame selector to switch between heliocentric inertial coordinates and following the selected world;
 - press `0` to reset the view and `+`/`-` to zoom; `F` enters the selected world's local system frame;
 - when the selected ship is parked, select another world and use **Plan selected orbit** or the destination selector to plot and commit a transfer;
-- use `+30d` for a month jump, or **Auto 1d/min** to let the live server advance one day per real minute; the same button pauses it.
+- use `+30d` or `+90d` for larger time jumps, or **Auto 1d/min** to let the live server advance one day per real minute; the same button pauses it.
 
 At higher zoom, elevator terminals and stations appear as distinct markers orbiting their world. Surface locations remain valid destinations in the ship planner, but are intentionally not rendered as orbital objects. Selecting a station or terminal focuses the camera and preselects the matching local-transfer location in the ship panel. The local marker radii are renderer geometry for inspection; they do not change the Hohmann or delta-v simulation.
 

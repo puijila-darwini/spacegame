@@ -107,6 +107,23 @@
   #file{display:none}
   .preview{background:rgba(107,63,160,.18); border-left:3px solid var(--royal);
     padding:4px 8px; font-size:12px; margin:4px 0; white-space:pre-wrap}
+  .filterbar{display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin:4px 0 8px}
+  .filterbar select,.filterbar input{max-width:150px}
+  .site-chip{display:inline-block; border:1px solid var(--straw-dim); border-radius:999px;
+    padding:2px 7px; margin:2px 3px 2px 0; color:var(--straw); font-size:10.5px}
+  .ops-row{display:flex; justify-content:space-between; gap:8px; align-items:center; padding:4px 0; border-bottom:1px dashed var(--straw-faint)}
+  .ops-row:last-child{border-bottom:none}
+  .palette-overlay{position:fixed; inset:0; background:rgba(4,12,10,.72); z-index:20; display:grid; place-items:start center; padding-top:12vh}
+  .palette-box{width:min(620px,92vw); background:var(--phthalo2); border:1px solid var(--straw-dim); border-top:4px solid var(--royal); box-shadow:0 16px 50px #000b; padding:12px}
+  .palette-box input{width:100%; max-width:none; font-size:15px; padding:9px}
+  .palette-list{max-height:360px; overflow:auto; margin-top:8px}
+  .palette-item{display:flex; justify-content:space-between; gap:12px; padding:8px; border-radius:5px; cursor:pointer; color:var(--ink)}
+  .palette-item:hover,.palette-item.active{background:rgba(107,63,160,.32); color:var(--straw)}
+  .palette-item small{color:var(--mut)}
+  .toast-stack{position:fixed; right:18px; bottom:18px; z-index:25; display:flex; flex-direction:column; gap:6px; max-width:min(360px,90vw)}
+  .toast{background:var(--phthalo2); border-left:4px solid var(--straw); padding:8px 12px; box-shadow:0 6px 20px #000b; font-size:12px}
+  .diagnostic{position:fixed; right:18px; top:108px; z-index:12; background:rgba(4,12,10,.82); border:1px solid var(--straw-dim); color:var(--straw); padding:8px 10px; font:11px/1.5 monospace; white-space:pre; pointer-events:none}
+  [hidden]{display:none !important}
 </style>
 </head>
 <body>
@@ -118,7 +135,11 @@
   <button class="btn ghost" id="adv1" hidden>+1d</button>
   <button class="btn ghost" id="adv7" hidden>+7d</button>
   <button class="btn ghost" id="adv30" hidden>+30d</button>
+  <button class="btn ghost" id="adv90" hidden>+90d</button>
   <button class="btn ghost" id="auto" hidden>Auto 1d/min</button>
+  <button class="btn ghost" id="export">Export</button>
+  <button class="btn ghost" id="diagnostics">Diagnostics</button>
+  <button class="btn ghost" id="help">?</button>
   <button class="btn ghost" id="reload">Reload snapshot.json</button>
   <label class="btn ghost" for="file">Load snapshot file…</label>
   <input type="file" id="file" accept=".json,application/json">
@@ -149,6 +170,11 @@
     </div>
     <div class="card">
       <span class="pill">LEDGER</span>
+      <div class="filterbar"><select id="ledger-filter" aria-label="Ledger filter">
+        <option value="all">All events</option><option value="arrival">Arrivals</option>
+        <option value="event">Events</option><option value="contract">Contracts</option>
+        <option value="service">Services</option><option value="contact">Contacts</option>
+      </select><input id="ledger-search" type="search" placeholder="filter ledger…"></div>
       <div class="body ledger" id="p-ledger"></div>
     </div>
   </div>
@@ -166,15 +192,33 @@
       <div class="body" id="p-port"></div>
     </div>
     <div class="card">
+      <span class="pill">WATCH / ARRIVALS</span>
+      <div class="body" id="p-ops"></div>
+    </div>
+    <div class="card">
       <span class="pill">CONTRACTS</span>
+      <div class="filterbar"><select id="contract-filter" aria-label="Contract filter">
+        <option value="all">All contracts</option><option value="open">Open</option>
+        <option value="accepted">Accepted</option><option value="filled">Filled</option>
+        <option value="lapsed">Lapsed</option>
+      </select></div>
       <div class="body" id="p-contracts"></div>
     </div>
     <div class="card">
       <span class="pill">CONTACTS</span>
+      <div class="filterbar"><input id="contact-search" type="search" placeholder="find name, port, occupation…"></div>
       <div class="body" id="p-contacts"></div>
     </div>
   </div>
 </main>
+<div class="palette-overlay" id="command-overlay" hidden>
+  <div class="palette-box"><input id="command-input" type="search" autocomplete="off" placeholder="Type a command…">
+    <div class="palette-list" id="command-list"></div>
+    <div class="tape">Enter run · Esc close · Ctrl/Cmd+K opens</div>
+  </div>
+</div>
+<div class="toast-stack" id="toast-stack"></div>
+<div class="diagnostic" id="diagnostic-panel" hidden></div>
 <p class="foot" id="foot">Drop a snapshot.json anywhere on this page, or serve the live backend.</p>
 <script>
 "use strict";
@@ -200,7 +244,20 @@ const py = y => { const o = frameOrigin(); return CY - (y - o.y - view.y) * scal
 let hitmap = [];
 let DRAW_SNAP = null, transition = null;
 let gesture = null;
+let ledgerFilter = "all", ledgerQuery = "", contractFilter = "all", contactQuery = "";
+let diagnostics = false, commandIndex = 0, toastSeq = 0;
+let frameCount = 0, fps = 0, lastFpsAt = performance.now();
 const pointers = new Map();
+
+function localSet(name){
+  try { return new Set(JSON.parse(localStorage.getItem(name) || "[]")); }
+  catch(e){ return new Set(); }
+}
+function saveLocalSet(name, set){
+  try { localStorage.setItem(name, JSON.stringify([...set])); } catch(e){}
+}
+const BOOKMARKS = localSet("sol-merchant-bookmarks");
+const WATCHLIST = localSet("sol-merchant-watchlist");
 
 function updateViewChip(){
   const chip = document.getElementById("chip-view");
@@ -238,6 +295,35 @@ function pointMid(a, b){ return {x:(a.x + b.x) / 2, y:(a.y + b.y) / 2}; }
 
 function esc(s){ return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
 function status(m){ document.getElementById("chip-status").textContent = m; }
+function toast(message){
+  const stack = document.getElementById("toast-stack");
+  const item = document.createElement("div");
+  item.className = "toast";
+  item.textContent = message;
+  stack.appendChild(item);
+  const id = ++toastSeq;
+  setTimeout(() => item.remove(), 4200 + Math.min(id % 3, 2) * 300);
+}
+function downloadSnapshot(){
+  if(!SNAP) return;
+  const blob = new Blob([JSON.stringify(SNAP, null, 2)], {type:"application/json"});
+  const url = URL.createObjectURL(blob), link = document.createElement("a");
+  link.href = url; link.download = `sol-merchant-t${SNAP.t}.json`; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  toast("Snapshot exported");
+}
+function toggleDiagnostics(){
+  diagnostics = !diagnostics;
+  document.getElementById("diagnostic-panel").hidden = !diagnostics;
+  document.getElementById("diagnostics").classList.toggle("active", diagnostics);
+}
+function updateDiagnostics(){
+  if(!diagnostics) return;
+  const now = performance.now();
+  if(now - lastFpsAt > 500){ fps = Math.round(frameCount * 1000 / (now - lastFpsAt)); frameCount = 0; lastFpsAt = now; }
+  document.getElementById("diagnostic-panel").textContent =
+    `FPS ${fps}\nzoom ${view.zoom.toFixed(1)}×\nframe ${frameOrigin().label}\nselected ${sel.body || "—"}\nsnapshot t=${SNAP ? SNAP.t : "—"}\ntransition ${transition ? "active" : "idle"}\nhitmap ${hitmap.length}`;
+}
 
 async function act(action, payload){
   const r = await fetch("/api/" + action, {method:"POST",
@@ -315,6 +401,10 @@ function blendSnapshots(from, to, fraction){
 function setSnapshot(next, animate = true){
   const previous = DRAW_SNAP || SNAP;
   const oldTime = SNAP && Number.isFinite(SNAP.t) ? SNAP.t : null;
+  const oldLedger = SNAP && SNAP.ledger && SNAP.ledger.length ? SNAP.ledger[SNAP.ledger.length - 1] : null;
+  const newLedger = next.ledger && next.ledger.length ? next.ledger[next.ledger.length - 1] : null;
+  if(oldLedger && newLedger && (oldLedger.t !== newLedger.t || oldLedger.msg !== newLedger.msg))
+    toast(`${String(newLedger.kind || "event").toUpperCase()}: ${newLedger.msg}`);
   SNAP = next;
   if(animate && previous && oldTime !== null && next.t > oldTime){
     transition = {from:previous, to:next, start:performance.now(), duration:2400};
@@ -325,6 +415,8 @@ function setSnapshot(next, animate = true){
   }
 }
 function animateScene(now){
+  frameCount++;
+  updateDiagnostics();
   if(transition){
     const fraction = Math.min(1, (now - transition.start) / transition.duration);
     DRAW_SNAP = blendSnapshots(transition.from, transition.to, fraction);
@@ -357,6 +449,47 @@ async function setAuto(enabled){
     status(result.enabled ? "auto time on · 1 day/min" : "auto time paused");
   }
 }
+function commandItems(){
+  const items = [
+    {label:"Focus selected world system", hint:"F", run:enterSystemView},
+    {label:"Reset camera", hint:"0", run:resetView},
+    {label:"Export current snapshot", hint:"download", run:downloadSnapshot},
+    {label:"Toggle diagnostics overlay", hint:"D", run:toggleDiagnostics},
+    {label:"Open keyboard command palette", hint:"Ctrl/Cmd+K", run:openPalette},
+  ];
+  if(LIVE){
+    items.unshift(
+      {label:"Advance one day", hint:"+1d", run:() => act("advance", {days:1})},
+      {label:"Advance seven days", hint:"+7d", run:() => act("advance", {days:7})},
+      {label:"Advance thirty days", hint:"+30d", run:() => act("advance", {days:30})},
+      {label:"Advance ninety days", hint:"+90d", run:() => act("advance", {days:90})},
+      {label:AUTO_ENABLED ? "Pause automatic time" : "Start automatic time", hint:"1d/min", run:() => setAuto(!AUTO_ENABLED)},
+    );
+  }
+  return items;
+}
+function renderCommands(){
+  const query = document.getElementById("command-input").value.trim().toLowerCase();
+  const items = commandItems().filter(item => item.label.toLowerCase().includes(query));
+  commandIndex = Math.max(0, Math.min(commandIndex, items.length - 1));
+  document.getElementById("command-list").innerHTML = items.map((item, i) =>
+    `<div class="palette-item${i === commandIndex ? " active" : ""}" data-command-index="${i}"><span>${esc(item.label)}</span><small>${esc(item.hint)}</small></div>`).join("") ||
+    "<div class='dim' style='padding:8px'>no matching command</div>";
+  document.querySelectorAll("[data-command-index]").forEach(el => {
+    el.onclick = () => { const item = items[Number(el.dataset.commandIndex)]; closePalette(); item.run(); };
+  });
+}
+function openPalette(){
+  document.getElementById("command-overlay").hidden = false;
+  const input = document.getElementById("command-input");
+  input.value = ""; commandIndex = 0; renderCommands(); input.focus();
+}
+function closePalette(){ document.getElementById("command-overlay").hidden = true; }
+function runPaletteCommand(){
+  const items = commandItems().filter(item => item.label.toLowerCase().includes(document.getElementById("command-input").value.trim().toLowerCase()));
+  const item = items[commandIndex];
+  if(item){ closePalette(); item.run(); }
+}
 
 async function boot(fromPoll){
   // live backend wins; otherwise fall back to the static file
@@ -384,6 +517,7 @@ function setLiveUI(){
   document.getElementById("adv1").hidden = false;
   document.getElementById("adv7").hidden = false;
   document.getElementById("adv30").hidden = false;
+  document.getElementById("adv90").hidden = false;
   document.getElementById("auto").hidden = false;
   updateAutoUI(); refreshAuto();
   document.getElementById("foot").textContent =
@@ -400,7 +534,22 @@ document.getElementById("reload").onclick = () => boot(false);
 document.getElementById("adv1").onclick = () => act("advance", {days: 1});
 document.getElementById("adv7").onclick = () => act("advance", {days: 7});
 document.getElementById("adv30").onclick = () => act("advance", {days: 30});
+document.getElementById("adv90").onclick = () => act("advance", {days: 90});
 document.getElementById("auto").onclick = () => setAuto(!AUTO_ENABLED);
+document.getElementById("export").onclick = downloadSnapshot;
+document.getElementById("diagnostics").onclick = toggleDiagnostics;
+document.getElementById("help").onclick = openPalette;
+document.getElementById("command-input").oninput = () => { commandIndex = 0; renderCommands(); };
+document.getElementById("command-input").onkeydown = e => {
+  if(e.key === "Enter"){ e.preventDefault(); runPaletteCommand(); }
+  else if(e.key === "ArrowDown"){ e.preventDefault(); commandIndex++; renderCommands(); }
+  else if(e.key === "ArrowUp"){ e.preventDefault(); commandIndex = Math.max(0, commandIndex - 1); renderCommands(); }
+};
+document.getElementById("command-overlay").onclick = e => { if(e.target.id === "command-overlay") closePalette(); };
+document.getElementById("ledger-filter").onchange = e => { ledgerFilter = e.target.value; render(); };
+document.getElementById("ledger-search").oninput = e => { ledgerQuery = e.target.value; render(); };
+document.getElementById("contract-filter").onchange = e => { contractFilter = e.target.value; render(); };
+document.getElementById("contact-search").oninput = e => { contactQuery = e.target.value; render(); };
 document.getElementById("reset").onclick = async () => {
   if(!LIVE){ status("Reset game requires the live server"); return; }
   if(!confirm("Reset the live game? This replaces the current campaign save.")) return;
@@ -423,7 +572,7 @@ function loadFile(f){
     LIVE = false;
     document.getElementById("chip-mode").textContent = "file mode";
     document.getElementById("chip-mode").classList.remove("live");
-    for(const id of ["adv1", "adv7", "adv30", "auto"]) document.getElementById(id).hidden = true;
+    for(const id of ["adv1", "adv7", "adv30", "adv90", "auto"]) document.getElementById(id).hidden = true;
     setSnapshot(JSON.parse(rd.result), false);
     status(f.name);
     render();
@@ -558,13 +707,17 @@ cv.addEventListener("dblclick", e => {
   if(hit){ selectHit(hit); enterSystemView(); }
 });
 window.addEventListener("keydown", e => {
+  if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k"){ e.preventDefault(); openPalette(); return; }
+  if(e.key === "Escape"){ closePalette(); return; }
   if(["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
-  if(e.key === "0") resetView();
+  if(e.key === "/"){ e.preventDefault(); openPalette(); }
+  else if(e.key === "0") resetView();
   else if(e.key === "+" || e.key === "="){
     const r = cv.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1.2);
   } else if(e.key === "-"){
     const r = cv.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1 / 1.2);
   } else if(e.key.toLowerCase() === "f") enterSystemView();
+  else if(e.key.toLowerCase() === "d") toggleDiagnostics();
 });
 
 function bodyById(id){ return SNAP.bodies.find(b => b.id === id); }
@@ -716,6 +869,12 @@ function bodyOptions(selected){
     `<option value="${b.id}"${b.id === selected ? " selected" : ""}>${esc(b.id[0].toUpperCase() + b.id.slice(1))}</option>`).join("");
 }
 
+function toggleStored(set, id, storageName){
+  if(set.has(id)){ set.delete(id); toast(`${id} removed from ${storageName}`); }
+  else { set.add(id); toast(`${id} added to ${storageName}`); }
+  saveLocalSet(storageName, set);
+  render();
+}
 function bodyPanel(){
   const body = bodyById(sel.body);
   if(!body) return "<span class='dim'>click a world to inspect it</span>";
@@ -738,7 +897,7 @@ function bodyPanel(){
     <div class="rowline"><span>orbital sites</span><span>${orbitalSites.length} stations / terminals</span></div>
     ${siteButtons ? `<div class="ctl">${siteButtons}</div>` : ""}
     ${selectedLocation ? `<div class="rowline"><span>selected site</span><span><b>${esc(selectedLocation.name)}</b></span></div>` : ""}
-    <div class="ctl"><button class="btn small ghost" id="body-focus">Focus ${esc(body.id)} system</button></div>`;
+    <div class="ctl"><button class="btn small ghost" id="body-focus">Focus ${esc(body.id)} system</button><button class="btn small ghost" id="body-bookmark">${BOOKMARKS.has(body.id) ? "★ Bookmarked" : "☆ Bookmark"}</button></div>`;
   return h;
 }
 
@@ -789,7 +948,8 @@ function portPanel(){
   if(!p) return "<span class='dim'>click a port world</span>";
   const last = Object.entries(p.last || {}).filter(([, v]) => v)
     .map(([c, v]) => `${esc(c)} ${v.side} ${v.qty}t @ ${v.price} (${v.t}d)`).join("<br>") || "<span class='dim'>no trades taped</span>";
-  let h = `<div class="rowline"><span class="cname">◆ ${esc(sel.port.toUpperCase())}</span></div>`;
+  let h = `<div class="rowline"><span class="cname">◆ ${esc(sel.port.toUpperCase())}</span><span class="tape">${WATCHLIST.has(sel.port) ? "★ watched" : "port"}</span></div>
+    <div class="ctl"><button class="btn tiny ghost" id="port-watch">${WATCHLIST.has(sel.port) ? "Unwatch port" : "Watch port"}</button></div>`;
   if(LIVE){
     const comms = Object.keys(p.asks).map(c => `<option>${c}</option>`).join("");
     h += `<div class="ctl"><select id="c-comm">${comms}</select>
@@ -803,9 +963,28 @@ function portPanel(){
   return h;
 }
 
+function opsPanel(){
+  const arrivals = SNAP.ships.filter(s => s.leg).sort((a, b) => a.eta_d - b.eta_d);
+  const watched = [...WATCHLIST].filter(id => SNAP.ports[id]);
+  let h = `<div class="tape">UPCOMING ARRIVALS</div>`;
+  h += arrivals.length ? arrivals.map(s =>
+    `<div class="ops-row"><span>${esc(s.id.toUpperCase())} → ${esc(s.leg.to)}</span><span>${s.eta_d.toFixed(1)}d</span></div>`).join("") :
+    "<div class='dim' style='padding:3px 0'>no ships in transit</div>";
+  h += `<div class="tape" style="margin-top:8px">WATCHED PORTS</div>`;
+  h += watched.length ? watched.map(id =>
+    `<div class="ops-row"><button class="btn tiny ghost" data-jump-port="${esc(id)}">${esc(id.toUpperCase())}</button><span>open book</span></div>`).join("") :
+    "<div class='dim' style='padding:3px 0'>use Watch port in the port panel</div>";
+  const bookmarks = [...BOOKMARKS].filter(id => SNAP.bodies.some(b => b.id === id));
+  h += `<div class="tape" style="margin-top:8px">BOOKMARKS</div>`;
+  h += bookmarks.length ? bookmarks.map(id =>
+    `<div class="ops-row"><button class="btn tiny ghost" data-jump-body="${esc(id)}">${esc(id.toUpperCase())}</button><span>system view</span></div>`).join("") :
+    "<div class='dim' style='padding:3px 0'>bookmark a world from Body / Frame</div>";
+  return h;
+}
 function contractPanel(){
-  if(!SNAP.contracts.length) return "<span class='dim'>no contracts posted</span>";
-  return SNAP.contracts.map(c => {
+  const contracts = SNAP.contracts.filter(c => contractFilter === "all" || c.status === contractFilter);
+  if(!contracts.length) return "<span class='dim'>no contracts match</span>";
+  return contracts.map(c => {
     const issuer = c.known ? esc(c.issuer) : "<span class='dim'>··· unknown issuer</span>";
     const cls = c.status === "filled" ? "" : (c.status === "lapsed" ? "ghostb" : "royal");
     let btns = "";
@@ -818,15 +997,21 @@ function contractPanel(){
 }
 
 function ledgerPanel(){
-  const items = SNAP.ledger.slice(-12).reverse();
+  const query = ledgerQuery.trim().toLowerCase();
+  const items = SNAP.ledger.filter(e => ledgerFilter === "all" || e.kind === ledgerFilter)
+    .filter(e => !query || `${e.kind} ${e.msg}`.toLowerCase().includes(query))
+    .slice(-50).reverse();
   if(!items.length) return "<span class='dim'>quiet… for now</span>";
   const cls = {arrival:"", event:"royal", contact:"ghostb", contract:"ghostb", service:"ghostb"};
   return items.map(e => `<div><span class="lt">t=${e.t}</span><span class="badge ${cls[e.kind] || ""}">${esc((e.kind || "?").toUpperCase())}</span>${esc(e.msg)}</div>`).join("");
 }
 
 function contactPanel(){
-  if(!SNAP.contacts.length) return "<span class='dim'>no contacts yet</span>";
-  let h = SNAP.contacts.map(n => `<div class="rowline"><span><span class="cname">${esc(n.name)}</span>
+  const query = contactQuery.trim().toLowerCase();
+  const contacts = SNAP.contacts.filter(n => !query ||
+    `${n.name} ${n.port} ${n.occupation}`.toLowerCase().includes(query));
+  if(!contacts.length) return "<span class='dim'>no contacts match</span>";
+  let h = contacts.map(n => `<div class="rowline"><span><span class="cname">${esc(n.name)}</span>
     <span class="dim">· ${esc(n.occupation)} (${esc(n.port)})</span></span></div>
     <div class="rowline"><span class="bar"><i style="width:${n.rapport}%"></i></span>
     <span class="tape">rap ${n.rapport} · rel ${Math.round(n.reliability * 100)}%${
@@ -899,12 +1084,23 @@ function render(){
   document.getElementById("p-body").innerHTML = bodyPanel();
   document.getElementById("p-ship").innerHTML = shipPanel();
   document.getElementById("p-port").innerHTML = portPanel();
+  document.getElementById("p-ops").innerHTML = opsPanel();
   document.getElementById("p-contracts").innerHTML = contractPanel();
   document.getElementById("p-ledger").innerHTML = ledgerPanel();
   document.getElementById("p-contacts").innerHTML = contactPanel();
   wireLive();
   const bodyFocus = document.getElementById("body-focus");
   if(bodyFocus) bodyFocus.onclick = enterSystemView;
+  const bodyBookmark = document.getElementById("body-bookmark");
+  if(bodyBookmark) bodyBookmark.onclick = () => toggleStored(BOOKMARKS, sel.body, "bookmarks");
+  const portWatch = document.getElementById("port-watch");
+  if(portWatch) portWatch.onclick = () => toggleStored(WATCHLIST, sel.port, "watchlist");
+  document.querySelectorAll("[data-jump-port]").forEach(button => {
+    button.onclick = () => { sel.port = button.dataset.jumpPort; sel.body = button.dataset.jumpPort; render(); };
+  });
+  document.querySelectorAll("[data-jump-body]").forEach(button => {
+    button.onclick = () => { selectHit({kind:"body", id:button.dataset.jumpBody}); enterSystemView(); };
+  });
   document.querySelectorAll("[data-focus-location]").forEach(button => {
     button.onclick = () => focusLocation(button.dataset.focusLocation);
   });
