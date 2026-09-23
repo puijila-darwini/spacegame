@@ -116,6 +116,8 @@
 <div class="toolbar">
   <button class="btn ghost" id="adv1" hidden>+1d</button>
   <button class="btn ghost" id="adv7" hidden>+7d</button>
+  <button class="btn ghost" id="adv30" hidden>+30d</button>
+  <button class="btn ghost" id="auto" hidden>Auto 1d/min</button>
   <button class="btn ghost" id="reload">Reload snapshot.json</button>
   <label class="btn ghost" for="file">Load snapshot file…</label>
   <input type="file" id="file" accept=".json,application/json">
@@ -162,8 +164,8 @@
 <p class="foot" id="foot">Drop a snapshot.json anywhere on this page, or serve the live backend.</p>
 <script>
 "use strict";
-let SNAP = null, LIVE = false, PREVIEW = "", QUOTE = "";
-const sel = { body: "tide", ship: "pc1", port: "tide" };
+let SNAP = null, LIVE = false, PREVIEW = "", QUOTE = "", AUTO_ENABLED = false;
+const sel = { body: "tide", ship: "pc1", port: "tide", location: null };
 const view = { x: 0, y: 0, zoom: 1 };
 const STRAW = "#F2E6A6", ROYAL = "#6B3FA0";
 const cv = document.getElementById("sys"), ctx = cv.getContext("2d");
@@ -217,6 +219,24 @@ async function act(action, payload){
   render();
   return j.result;
 }
+function updateAutoUI(){
+  const button = document.getElementById("auto");
+  if(button) button.textContent = AUTO_ENABLED ? "Pause auto" : "Auto 1d/min";
+}
+async function refreshAuto(){
+  try{
+    const r = await fetch("/api/auto", {cache:"no-store"});
+    if(r.ok){ AUTO_ENABLED = (await r.json()).enabled; updateAutoUI(); }
+  }catch(e){}
+}
+async function setAuto(enabled){
+  const result = await act("auto", {enabled});
+  if(result){
+    AUTO_ENABLED = result.enabled;
+    updateAutoUI();
+    status(result.enabled ? "auto time on · 1 day/min" : "auto time paused");
+  }
+}
 
 async function boot(fromPoll){
   // live backend wins; otherwise fall back to the static file
@@ -243,6 +263,9 @@ function setLiveUI(){
   document.getElementById("chip-mode").classList.add("live");
   document.getElementById("adv1").hidden = false;
   document.getElementById("adv7").hidden = false;
+  document.getElementById("adv30").hidden = false;
+  document.getElementById("auto").hidden = false;
+  updateAutoUI(); refreshAuto();
   document.getElementById("foot").textContent =
     "Live game — every action posts to the sim and saves. Reset game replaces the live save with a new default campaign.";
 }
@@ -256,6 +279,8 @@ function poll(){ setInterval(async () => {
 document.getElementById("reload").onclick = () => boot(false);
 document.getElementById("adv1").onclick = () => act("advance", {days: 1});
 document.getElementById("adv7").onclick = () => act("advance", {days: 7});
+document.getElementById("adv30").onclick = () => act("advance", {days: 30});
+document.getElementById("auto").onclick = () => setAuto(!AUTO_ENABLED);
 document.getElementById("reset").onclick = async () => {
   if(!LIVE){ status("Reset game requires the live server"); return; }
   if(!confirm("Reset the live game? This replaces the current campaign save.")) return;
@@ -286,23 +311,32 @@ function pickAt(e){
 }
 function selectHit(hit){
   if(!hit) return;
-  if(hit.kind === "ship"){
+  if(hit.kind === "location"){
+    const loc = (SNAP.locations || []).find(l => l.id === hit.id);
+    if(!loc) return;
+    sel.location = loc.id;
+    sel.body = loc.body;
+    if(SNAP.ports[loc.body]) sel.port = loc.body;
+  } else if(hit.kind === "ship"){
     const ship = SNAP.ships.find(s => s.id === hit.id);
     sel.ship = hit.id;
     if(ship && ship.at) sel.body = ship.at;
+    sel.location = ship && ship.loc ? ship.loc : null;
   } else {
     sel.body = hit.id;
+    sel.location = null;
     if(SNAP.ports[hit.id]) sel.port = hit.id;
   }
   render();
 }
 function focusSelection(){
+  const loc = (SNAP.locations || []).find(l => l.id === sel.location);
   const body = bodyById(sel.body);
   const ship = SNAP.ships.find(s => s.id === sel.ship);
-  const target = body || ship;
+  const target = loc || body || ship;
   if(!target) return;
   view.x = target.x; view.y = target.y;
-  view.zoom = Math.max(view.zoom, body && body.parent ? 4 : 2.2);
+  view.zoom = Math.max(view.zoom, loc ? 4.5 : body && body.parent ? 4 : 2.2);
   updateViewChip(); draw();
 }
 cv.addEventListener("pointerdown", e => {
@@ -396,6 +430,36 @@ function draw(){
       ctx.beginPath(); ctx.arc(px(p.x), py(p.y), b.a * drawScale, 0, Math.PI * 2); ctx.stroke();
     }
   }
+  for(const loc of SNAP.locations || []){
+    const parent = bodyById(loc.body);
+    if(!parent) continue;
+    const parentX = px(parent.x), parentY = py(parent.y);
+    ctx.strokeStyle = "rgba(242,230,166,.18)";
+    ctx.setLineDash([2, 4]); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(parentX, parentY, loc.orbit_a * drawScale, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([]);
+    const X = px(loc.x), Y = py(loc.y);
+    const selected = sel.location === loc.id;
+    if(view.zoom < 1.15 && !selected) continue;
+    const markerR = loc.kind === "station" ? 3.5 : loc.kind === "terminal" ? 3 : 2.2;
+    ctx.fillStyle = loc.kind === "station" ? STRAW : loc.kind === "terminal" ? ROYAL : "#cdbf85";
+    ctx.beginPath();
+    if(loc.kind === "station") ctx.rect(X - markerR, Y - markerR, markerR * 2, markerR * 2);
+    else if(loc.kind === "terminal"){
+      ctx.moveTo(X, Y - markerR - 1); ctx.lineTo(X + markerR + 1, Y + markerR);
+      ctx.lineTo(X - markerR - 1, Y + markerR); ctx.closePath();
+    } else ctx.arc(X, Y, markerR, 0, Math.PI * 2);
+    ctx.fill();
+    if(selected){
+      ctx.strokeStyle = STRAW; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(X, Y, markerR + 5, 0, Math.PI * 2); ctx.stroke();
+    }
+    if(view.zoom >= 3 || selected){
+      ctx.fillStyle = "rgba(237,231,200,.9)"; ctx.font = "10px sans-serif"; ctx.textAlign = "left";
+      ctx.fillText(loc.name, X + markerR + 4, Y + 3);
+    }
+    hitmap.push({kind:"location", id:loc.id, x:X, y:Y, r:Math.max(10, markerR + 5)});
+  }
   for(const s of SNAP.ships){
     if(!s.leg || !s.arc_pts.length) continue;
     ctx.strokeStyle = "rgba(242,230,166,.55)"; ctx.setLineDash([5, 4]); ctx.lineWidth = 1.4;
@@ -455,9 +519,9 @@ function destOptions(cur, selected){
   return SNAP.bodies.filter(b => b.id !== "sun" && b.id !== cur)
     .map(b => `<option value="${b.id}"${b.id === selected ? " selected" : ""}>${b.id[0].toUpperCase() + b.id.slice(1)}</option>`).join("");
 }
-function locOptions(body){
+function locOptions(body, selected){
   return (SNAP.locations || []).filter(l => l.body === body)
-    .map(l => `<option value="${l.id}">${esc(l.name)}</option>`).join("");
+    .map(l => `<option value="${l.id}"${l.id === selected ? " selected" : ""}>${esc(l.name)}</option>`).join("");
 }
 
 function shipPanel(){
@@ -468,6 +532,8 @@ function shipPanel(){
     <div class="tape">${(s.progress * 100).toFixed(1)}% · ETA ${s.eta_d.toFixed(1)}d</div>` : "";
   const cargo = Object.entries(s.cargo || {}).map(([c, q]) => `${esc(c)} ${q}t`).join(" · ") || "<span class='dim'>empty hold</span>";
   const target = sel.body && sel.body !== "sun" && sel.body !== s.at ? bodyById(sel.body) : null;
+  const selectedLocation = sel.location && sel.location.startsWith(`${s.at}-`) ?
+    (SNAP.locations || []).find(l => l.id === sel.location) : null;
   let h = `<div class="rowline"><span class="cname">◆ ${esc(s.id.toUpperCase())}</span><span class="tape">${status}</span></div>${bar}
     <div class="rowline"><span>hold</span><span>${cargo} <span class="dim">/ ${s.cargo_cap}t</span></span></div>
     <div class="rowline"><span>tank</span><span>${s.dv} <span class="dim">/ ${s.dv_cap} dv</span></span></div>`;
@@ -478,7 +544,8 @@ function shipPanel(){
       <input type="number" id="c-by" placeholder="arrive by t=" style="width:110px">
       <button class="btn small ghost" id="c-prev">Preview</button>
       <button class="btn small" id="c-go">Commit</button></div>
-      <div class="ctl"><select id="c-loc">${locOptions(s.at)}</select>
+      ${selectedLocation ? `<div class="rowline"><span class="tape">selected local location</span><span><b>${esc(selectedLocation.name)}</b> · ${esc(selectedLocation.kind)}</span></div>` : ""}
+      <div class="ctl"><select id="c-loc">${locOptions(s.at, sel.location)}</select>
       <button class="btn small ghost" id="c-transfer">Move here</button>
       <button class="btn small ghost" id="c-fuel">Refuel</button></div>
       ${PREVIEW ? `<div class="preview">${esc(PREVIEW)}</div>` : ""}`;

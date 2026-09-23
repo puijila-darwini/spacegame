@@ -97,6 +97,15 @@ def test_reset():
     assert body["snapshot"]["t"] == 0 and body["snapshot"]["credits"] == 10000
 
 
+def test_auto_toggle():
+    code, body = call("POST", "/api/auto", {"enabled": True})
+    assert code == 200 and body["result"]["enabled"] is True
+    code, body = call("GET", "/api/auto")
+    assert code == 200 and body["enabled"] is True
+    code, body = call("POST", "/api/auto", {"enabled": False})
+    assert code == 200 and body["result"]["enabled"] is False
+
+
 if __name__ == "__main__":
     tmp = tempfile.mkdtemp(prefix="spacegame-live-")
     srv = live.make_server(0, os.path.join(tmp, "live.json"))
@@ -111,6 +120,7 @@ if __name__ == "__main__":
         ("bad_action", test_bad_action),
         ("contract_lapse", test_contract_lapse_over_wire),
         ("reset", test_reset),
+        ("auto_toggle", test_auto_toggle),
     ]
     ok = all(check(n, f) for n, f in tests)
     print(f"\n{len(PASS)}/{len(tests)} passed")

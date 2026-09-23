@@ -25,7 +25,10 @@ The system view is a camera-based canvas:
 - click a world or ship to select it;
 - double-click a selection to focus the camera on it;
 - press `0` to reset the view, `+`/`-` to zoom, and `F` to focus the selection;
-- when the selected ship is parked, select another world and use **Plan selected orbit** or the destination selector to plot and commit a transfer.
+- when the selected ship is parked, select another world and use **Plan selected orbit** or the destination selector to plot and commit a transfer;
+- use `+30d` for a month jump, or **Auto 1d/min** to let the live server advance one day per real minute; the same button pauses it.
+
+At higher zoom, local surfaces, elevator terminals, and stations appear as distinct markers orbiting their world. They are selectable, and selecting one focuses the camera and preselects the matching local-transfer location in the ship panel. The local marker radii are renderer geometry for inspection; they do not change the Hohmann or delta-v simulation.
 
 The right-hand panels follow the current selection. A body selection can be used as the transfer destination without leaving the system view.
 

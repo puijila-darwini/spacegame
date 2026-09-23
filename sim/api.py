@@ -4,7 +4,7 @@ Shape:
 {v:3, t, credits, bodies:[{id,parent,a,angle,x,y}],
  ships:[{id,at,loc,loc_to,leg,x,y,progress,eta_d,arc_pts,cargo,cargo_cap,dv,dv_cap}],
  ports:{port_id:{asks,bids,last}}, ledger:[...],
- locations:[{id,name,body,kind,depart_dv,arrive_dv,service}],
+ locations:[{id,name,body,kind,depart_dv,arrive_dv,service,x,y,orbit_a,orbit_angle}],
  contacts:[{id,name,port,occupation,reliability,rapport}],
  known:{port_id:[parties]},
  contracts:[{id,issuer,port,dest,comm,qty,delivered,price,deadline,status,known}]}
@@ -22,6 +22,24 @@ from . import orbits
 from .state import Game
 
 SNAPSHOT_VERSION = 3
+
+# Renderer-side local geometry. These are deliberately tiny AU-scale offsets,
+# not navigation radii: they make stations/terminals/surfaces inspectable when
+# the camera zooms into a world without changing the movement simulation.
+LOCATION_ORBITS = {
+    "surface": (0.016, 1.1, 0.0),
+    "terminal": (0.028, 1.8, 1.3),
+    "station": (0.042, 2.6, 2.4),
+}
+
+
+def _location_pos(game: Game, loc: dict) -> tuple[float, float, float, float]:
+    body = game.bodies[loc["body"]]
+    bx, by, _ = orbits.body_pos(body, game.bodies, game.t)
+    orbit_a, period_d, phase = LOCATION_ORBITS[loc["kind"]]
+    angle = phase + math.tau * game.t / period_d
+    return (bx + orbit_a * math.cos(angle),
+            by + orbit_a * math.sin(angle), orbit_a, angle)
 
 
 def _kepler_E(M: float, e: float) -> float:
@@ -132,10 +150,14 @@ def snapshot(game: Game) -> dict:
     for c in game.contracts.values():
         known = c["issuer"] in game.known.get(c["port"], [])
         contract_list.append({**c, "known": known})
-    locations = [{"id": loc["id"], "name": loc["name"], "body": loc["body"],
-                  "kind": loc["kind"], "depart_dv": loc["depart_dv"],
-                  "arrive_dv": loc["arrive_dv"], "service": loc["service"]}
-                 for loc in game.locations.values()]
+    locations = []
+    for loc in game.locations.values():
+        lx, ly, orbit_a, orbit_angle = _location_pos(game, loc)
+        locations.append({"id": loc["id"], "name": loc["name"], "body": loc["body"],
+                          "kind": loc["kind"], "depart_dv": loc["depart_dv"],
+                          "arrive_dv": loc["arrive_dv"], "service": loc["service"],
+                          "x": round(lx, 6), "y": round(ly, 6),
+                          "orbit_a": orbit_a, "orbit_angle": round(orbit_angle, 6)})
     return {"v": SNAPSHOT_VERSION, "t": round(game.t, 2), "credits": round(game.credits, 2),
             "bodies": bodies, "ships": ships, "ports": ports, "ledger": ledger,
             "locations": locations,

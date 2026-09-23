@@ -41,6 +41,7 @@ class Store:
     def __init__(self, path: str = SAVE):
         self.path = path
         self.lock = threading.Lock()
+        self.auto_enabled = os.environ.get("SPACEGAME_AUTO") == "1"
         try:
             self.game = persist.load(path)
         except (FileNotFoundError, ValueError, KeyError):
@@ -62,7 +63,9 @@ class Store:
                 days = float(p.get("days", 1))
                 if days <= 0 or days > 3650:
                     raise ValueError("days must be 1..3650")
-                return {"reports": simtime.advance(g, days)}
+                reports = simtime.advance(g, days)
+                self._save()
+                return {"reports": reports}
             if name == "plot":
                 return ships.plot(g, p["ship"], p["dest"], p.get("dest_loc"),
                                   None, p.get("arrive_by"))
@@ -105,6 +108,9 @@ class Store:
                 return {"introduced": party}
             if name == "quote":
                 return contacts.quote(g, p["npc"], p.get("comm"))
+            if name == "auto":
+                self.auto_enabled = bool(p.get("enabled", True))
+                return {"enabled": self.auto_enabled, "interval_s": 60, "days": 1}
             if name == "reset":
                 self.game = fresh_game()
                 self._save()
@@ -132,6 +138,11 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/api/snapshot", "/snapshot.json"):
             assert self.store is not None
             self._send(200, self.store.snapshot())
+            return
+        if path == "/api/auto":
+            assert self.store is not None
+            self._send(200, {"enabled": self.store.auto_enabled,
+                             "interval_s": 60, "days": 1})
             return
         if path == "/":
             path = "/index.html"
@@ -174,6 +185,8 @@ def auto_loop(store: Store, interval: float = 60.0, days: float = 1.0) -> None:
 
     while True:
         wall.sleep(interval)
+        if not store.auto_enabled:
+            continue
         try:
             store.act("advance", {"days": days})
         except Exception:  # never kill the daemon on a bad tick
@@ -183,9 +196,9 @@ def auto_loop(store: Store, interval: float = 60.0, days: float = 1.0) -> None:
 def main(argv: list) -> None:
     port = int(argv[1]) if len(argv) > 1 else 8765
     server = make_server(port)
-    if os.environ.get("SPACEGAME_AUTO") == "1":
-        threading.Thread(target=auto_loop, args=(server.RequestHandlerClass.store,),
-                         daemon=True).start()
+    threading.Thread(target=auto_loop, args=(server.RequestHandlerClass.store,),
+                     daemon=True).start()
+    if server.RequestHandlerClass.store.auto_enabled:
         print("daemon auto-advance on: 1 day / minute")
     print(f"Sol Merchant live on http://{HOST}:{port}  (save: {SAVE})")
     server.serve_forever()
