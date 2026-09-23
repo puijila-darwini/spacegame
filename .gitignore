@@ -1,6 +1,7 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.playwright-mcp/
 
 # Local game state and development scratch
 web/live.json
