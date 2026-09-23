@@ -151,6 +151,10 @@
   </div>
   <div>
     <div class="card">
+      <span class="pill">BODY / FRAME</span>
+      <div class="body" id="p-body"></div>
+    </div>
+    <div class="card">
       <span class="pill">SHIP</span>
       <div class="body" id="p-ship"></div>
     </div>
@@ -688,6 +692,28 @@ function locOptions(body, selected){
     .map(l => `<option value="${l.id}"${l.id === selected ? " selected" : ""}>${esc(l.name)}</option>`).join("");
 }
 
+function bodyPanel(){
+  const body = bodyById(sel.body);
+  if(!body) return "<span class='dim'>click a world to inspect it</span>";
+  const parent = body.parent ? bodyById(body.parent) : null;
+  const children = SNAP.bodies.filter(b => b.parent === body.id);
+  const locations = (SNAP.locations || []).filter(l => l.body === body.id);
+  const selectedLocation = (SNAP.locations || []).find(l => l.id === sel.location);
+  const period = body.id === "sun" ? "system origin" :
+    body.period ? `${body.period.toFixed(1)} d period` : "period —";
+  const frame = frameOrigin().label;
+  let h = `<div class="rowline"><span class="cname">◆ ${esc(body.id[0].toUpperCase() + body.id.slice(1))}</span><span class="badge royal">${esc(body.kind.toUpperCase())}</span></div>
+    <div class="rowline"><span>reference frame</span><span><b>${esc(frame)}</b></span></div>
+    <div class="rowline"><span>orbital radius</span><span>${body.a ? `${body.a.toFixed(4)} AU` : "—"}</span></div>
+    <div class="rowline"><span>${body.id === "sun" ? "period" : "local period"}</span><span>${esc(period)}</span></div>
+    <div class="rowline"><span>parent</span><span>${parent ? esc(parent.id) : "—"}</span></div>
+    <div class="rowline"><span>moons</span><span>${children.length ? children.map(b => esc(b.id)).join(" · ") : "—"}</span></div>
+    <div class="rowline"><span>orbital sites</span><span>${locations.filter(l => l.kind !== "surface").length} stations / terminals</span></div>
+    ${selectedLocation ? `<div class="rowline"><span>selected site</span><span><b>${esc(selectedLocation.name)}</b></span></div>` : ""}
+    <div class="ctl"><button class="btn small ghost" id="body-focus">Focus ${esc(body.id)} system</button></div>`;
+  return h;
+}
+
 function shipPanel(){
   const s = SNAP.ships.find(x => x.id === sel.ship) || SNAP.ships[0];
   if(!s) return "<span class='dim'>no ships</span>";
@@ -839,12 +865,15 @@ function render(){
   if(!SNAP) return;
   document.getElementById("chip-t").textContent = "t = " + SNAP.t + "d";
   document.getElementById("chip-cr").textContent = SNAP.credits.toLocaleString() + " cr";
+  document.getElementById("p-body").innerHTML = bodyPanel();
   document.getElementById("p-ship").innerHTML = shipPanel();
   document.getElementById("p-port").innerHTML = portPanel();
   document.getElementById("p-contracts").innerHTML = contractPanel();
   document.getElementById("p-ledger").innerHTML = ledgerPanel();
   document.getElementById("p-contacts").innerHTML = contactPanel();
   wireLive();
+  const bodyFocus = document.getElementById("body-focus");
+  if(bodyFocus) bodyFocus.onclick = enterSystemView;
 }
 boot(false);
 </script>
