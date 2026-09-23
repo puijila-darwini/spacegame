@@ -46,6 +46,7 @@
   .btn.ghost{background:transparent; color:var(--straw); box-shadow:none;
     border:1px solid var(--straw-dim); border-radius:7px; padding:8px 14px}
   .btn.small{padding:5px 10px 7px; font-size:12px}
+  .btn.tiny{padding:3px 7px 5px; font-size:10.5px; border-radius:5px}
   main{display:grid; grid-template-columns:minmax(560px,1fr) 380px; gap:14px; padding:0 22px 22px}
   @media (max-width:1000px){main{grid-template-columns:1fr}}
   .card{
@@ -129,6 +130,8 @@
     <option value="inertial">Heliocentric inertial</option>
     <option value="follow">Follow selected world</option>
   </select>
+  <label class="mini" for="body-jump">go to</label>
+  <select id="body-jump" aria-label="Jump to body"></select>
   <span class="chip" id="chip-view">view 1.0×</span>
   <span class="chip" id="chip-frame">frame: heliocentric</span>
   <span class="chip" id="chip-mode">file mode</span>
@@ -408,6 +411,9 @@ document.getElementById("reset").onclick = async () => {
 document.getElementById("view-reset").onclick = resetView;
 document.getElementById("view-system").onclick = enterSystemView;
 document.getElementById("frame-mode").onchange = e => setFrameMode(e.target.value);
+document.getElementById("body-jump").onchange = e => {
+  if(e.target.value){ selectHit({kind:"body", id:e.target.value}); enterSystemView(); }
+};
 document.getElementById("file").onchange = e => { if(e.target.files[0]) loadFile(e.target.files[0]); };
 window.addEventListener("dragover", e => e.preventDefault());
 window.addEventListener("drop", e => { e.preventDefault(); if(e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]); });
@@ -456,30 +462,44 @@ function selectHit(hit){
   }
   render();
 }
-function focusSelection(){
-  const loc = (SNAP.locations || []).find(l => l.id === sel.location);
-  const body = bodyById(sel.body);
-  const ship = SNAP.ships.find(s => s.id === sel.ship);
-  const target = loc || body || ship;
-  if(!target) return;
+function systemZoomFor(bodyId){
+  const body = bodyById(bodyId);
+  if(!body) return 100;
+  const extent = Math.max(
+    SNAP.bodies.filter(b => b.parent === body.id).reduce((m, b) => Math.max(m, b.a || 0), 0),
+    (SNAP.locations || []).filter(l => l.body === body.id).reduce((m, l) => Math.max(m, l.orbit_a || 0), 0),
+    0.001);
+  return Math.max(20, Math.min(250, Math.min(W, H) * 0.38 / (extent * BASE_SCALE)));
+}
+function focusLocation(locationId){
+  const loc = (SNAP.locations || []).find(l => l.id === locationId);
+  if(!loc) return;
+  sel.location = loc.id;
+  sel.body = loc.body;
+  if(SNAP.ports[loc.body]) sel.port = loc.body;
+  frameMode = "follow";
+  document.getElementById("frame-mode").value = frameMode;
   const origin = frameOrigin();
-  view.x = frameMode === "follow" ? target.x - origin.x : target.x;
-  view.y = frameMode === "follow" ? target.y - origin.y : target.y;
-  const focusZoom = loc ? 160 : body && body.id === "sun" ? 40 :
-    body && body.parent ? 120 : 100;
-  view.zoom = Math.max(view.zoom, focusZoom);
+  view.x = loc.x - origin.x; view.y = loc.y - origin.y;
+  view.zoom = Math.max(view.zoom, 120);
   updateViewChip(); draw();
+  render();
 }
 function enterSystemView(){
   frameMode = "follow";
   document.getElementById("frame-mode").value = frameMode;
-  focusSelection();
+  const body = bodyById(sel.body);
+  if(!body) return;
+  view.x = 0; view.y = 0;
+  view.zoom = systemZoomFor(body.id);
+  updateViewChip(); draw();
+  render();
 }
 function setFrameMode(mode){
   frameMode = mode;
   const frameSelect = document.getElementById("frame-mode");
   if(frameSelect) frameSelect.value = mode;
-  if(mode === "follow") focusSelection();
+  if(mode === "follow") enterSystemView();
   else { view.x = 0; view.y = 0; view.zoom = 1; updateViewChip(); draw(); }
 }
 cv.addEventListener("pointerdown", e => {
@@ -691,6 +711,10 @@ function locOptions(body, selected){
   return (SNAP.locations || []).filter(l => l.body === body)
     .map(l => `<option value="${l.id}"${l.id === selected ? " selected" : ""}>${esc(l.name)}</option>`).join("");
 }
+function bodyOptions(selected){
+  return (SNAP.bodies || []).map(b =>
+    `<option value="${b.id}"${b.id === selected ? " selected" : ""}>${esc(b.id[0].toUpperCase() + b.id.slice(1))}</option>`).join("");
+}
 
 function bodyPanel(){
   const body = bodyById(sel.body);
@@ -699,6 +723,9 @@ function bodyPanel(){
   const children = SNAP.bodies.filter(b => b.parent === body.id);
   const locations = (SNAP.locations || []).filter(l => l.body === body.id);
   const selectedLocation = (SNAP.locations || []).find(l => l.id === sel.location);
+  const orbitalSites = locations.filter(l => l.kind !== "surface");
+  const siteButtons = orbitalSites.map(l =>
+    `<button class="btn tiny ghost" data-focus-location="${esc(l.id)}">${esc(l.name)}</button>`).join("");
   const period = body.id === "sun" ? "system origin" :
     body.period ? `${body.period.toFixed(1)} d period` : "period —";
   const frame = frameOrigin().label;
@@ -708,7 +735,8 @@ function bodyPanel(){
     <div class="rowline"><span>${body.id === "sun" ? "period" : "local period"}</span><span>${esc(period)}</span></div>
     <div class="rowline"><span>parent</span><span>${parent ? esc(parent.id) : "—"}</span></div>
     <div class="rowline"><span>moons</span><span>${children.length ? children.map(b => esc(b.id)).join(" · ") : "—"}</span></div>
-    <div class="rowline"><span>orbital sites</span><span>${locations.filter(l => l.kind !== "surface").length} stations / terminals</span></div>
+    <div class="rowline"><span>orbital sites</span><span>${orbitalSites.length} stations / terminals</span></div>
+    ${siteButtons ? `<div class="ctl">${siteButtons}</div>` : ""}
     ${selectedLocation ? `<div class="rowline"><span>selected site</span><span><b>${esc(selectedLocation.name)}</b></span></div>` : ""}
     <div class="ctl"><button class="btn small ghost" id="body-focus">Focus ${esc(body.id)} system</button></div>`;
   return h;
@@ -865,6 +893,9 @@ function render(){
   if(!SNAP) return;
   document.getElementById("chip-t").textContent = "t = " + SNAP.t + "d";
   document.getElementById("chip-cr").textContent = SNAP.credits.toLocaleString() + " cr";
+  const bodyJump = document.getElementById("body-jump");
+  bodyJump.innerHTML = bodyOptions(sel.body);
+  bodyJump.value = sel.body;
   document.getElementById("p-body").innerHTML = bodyPanel();
   document.getElementById("p-ship").innerHTML = shipPanel();
   document.getElementById("p-port").innerHTML = portPanel();
@@ -874,6 +905,9 @@ function render(){
   wireLive();
   const bodyFocus = document.getElementById("body-focus");
   if(bodyFocus) bodyFocus.onclick = enterSystemView;
+  document.querySelectorAll("[data-focus-location]").forEach(button => {
+    button.onclick = () => focusLocation(button.dataset.focusLocation);
+  });
 }
 boot(false);
 </script>

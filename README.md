@@ -25,6 +25,7 @@ The system view is a camera-based canvas:
 - click a world or ship to select it;
 - double-click a world to enter its full local system view (`100×–160×` depending on the world);
 - use **System view** or `F` to focus the selected world in its co-moving local frame;
+- use the **go to** selector to jump directly to any world, then **System view** to fit its moons and orbital sites automatically;
 - use the frame selector to switch between heliocentric inertial coordinates and following the selected world;
 - press `0` to reset the view and `+`/`-` to zoom; `F` enters the selected world's local system frame;
 - when the selected ship is parked, select another world and use **Plan selected orbit** or the destination selector to plot and commit a transfer;
