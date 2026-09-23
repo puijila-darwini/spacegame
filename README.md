@@ -16,6 +16,19 @@ Then open <http://192.168.1.38:8765/> from another device on the LAN, or <http:/
 
 The server exposes a JSON API under `/api/` and saves the campaign to `~/ai/tmp/spacegame/live.json` by default. Set `SPACEGAME_SAVE` to change the save path, `SPACEGAME_HOST` to change the bind address, or `SPACEGAME_AUTO=1` to advance one game day per real minute.
 
+## Interface controls
+
+The system view is a camera-based canvas:
+
+- drag to pan;
+- use the wheel or a pinch gesture to zoom around the pointer;
+- click a world or ship to select it;
+- double-click a selection to focus the camera on it;
+- press `0` to reset the view, `+`/`-` to zoom, and `F` to focus the selection;
+- when the selected ship is parked, select another world and use **Plan selected orbit** or the destination selector to plot and commit a transfer.
+
+The right-hand panels follow the current selection. A body selection can be used as the transfer destination without leaving the system view.
+
 ## Tests
 
 The test suite uses only the Python standard library:

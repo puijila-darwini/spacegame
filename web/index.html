@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sol Merchant — system view</title>
+<link rel="icon" href="data:,">
 <style>
   :root{
     --phthalo:#0B1F1A; --phthalo2:#0E2A23; --straw:#F2E6A6; --royal:#6B3FA0;
@@ -63,8 +64,19 @@
   .pill::after{content:""; width:14px; height:14px; background:var(--straw);
     clip-path:polygon(0 0, 100% 50%, 0 100%); margin-right:2px}
   .card .body{padding:2px 14px}
-  canvas#sys{width:100%; height:auto; display:block; cursor:crosshair;
+  canvas#sys{width:100%; height:auto; display:block; cursor:grab; touch-action:none;
     background:radial-gradient(closest-side, rgba(242,230,166,.05), transparent 70%)}
+  canvas#sys.dragging{cursor:grabbing}
+  .canvas-help{padding:4px 0 0; color:var(--mut); font-size:11.5px; text-align:center}
+  @media (max-width:620px){
+    header.band{padding:12px 14px 10px}
+    .toolbar{padding:9px 14px; gap:7px}
+    main{padding:0 14px 18px; gap:10px}
+    .card{margin-bottom:10px}
+    .card .body{padding-left:10px; padding-right:10px}
+    .ctl{gap:5px}
+    select, input[type=number]{max-width:145px}
+  }
   table.book{width:100%; border-collapse:collapse; font-size:12.5px; margin:4px 0 8px}
   table.book td, table.book th{padding:2px 6px; text-align:right; border-bottom:1px dashed rgba(242,230,166,.12)}
   table.book td:first-child, table.book th:first-child{text-align:left}
@@ -108,6 +120,8 @@
   <label class="btn ghost" for="file">Load snapshot file…</label>
   <input type="file" id="file" accept=".json,application/json">
   <button class="btn ghost" id="reset">Reset game</button>
+  <button class="btn ghost" id="view-reset">Reset view</button>
+  <span class="chip" id="chip-view">view 1.0×</span>
   <span class="chip" id="chip-mode">file mode</span>
   <span class="chip" id="chip-t">t = —</span>
   <span class="chip" id="chip-cr">— cr</span>
@@ -117,7 +131,9 @@
   <div>
     <div class="card">
       <span class="pill">SYSTEM VIEW</span>
-      <div class="body"><canvas id="sys" width="860" height="680"></canvas></div>
+      <div class="body"><canvas id="sys" width="860" height="680"></canvas>
+        <div class="canvas-help">Drag to pan · wheel or pinch to zoom · click a world or ship · double-click to focus</div>
+      </div>
     </div>
     <div class="card">
       <span class="pill">LEDGER</span>
@@ -148,12 +164,45 @@
 "use strict";
 let SNAP = null, LIVE = false, PREVIEW = "", QUOTE = "";
 const sel = { body: "tide", ship: "pc1", port: "tide" };
+const view = { x: 0, y: 0, zoom: 1 };
 const STRAW = "#F2E6A6", ROYAL = "#6B3FA0";
 const cv = document.getElementById("sys"), ctx = cv.getContext("2d");
 const W = cv.width, H = cv.height, CX = W / 2, CY = H / 2;
-const SC = Math.min(W, H) / 2 / 9.9; // MUD-literal radii: Fulmaior rides at 9.43
-const px = x => CX + x * SC, py = y => CY - y * SC;
+const BASE_SCALE = Math.min(W, H) / 2 / 9.9; // MUD-literal radii: Fulmaior rides at 9.43
+const scale = () => BASE_SCALE * view.zoom;
+const px = x => CX + (x - view.x) * scale();
+const py = y => CY - (y - view.y) * scale();
 let hitmap = [];
+let gesture = null;
+const pointers = new Map();
+
+function updateViewChip(){
+  const chip = document.getElementById("chip-view");
+  if(chip) chip.textContent = `view ${view.zoom.toFixed(1)}×`;
+}
+function resetView(){
+  view.x = 0; view.y = 0; view.zoom = 1;
+  updateViewChip(); draw();
+}
+function zoomAt(clientX, clientY, factor){
+  const r = cv.getBoundingClientRect();
+  const mx = (clientX - r.left) * (W / r.width);
+  const my = (clientY - r.top) * (H / r.height);
+  const oldScale = scale();
+  const wx = (mx - CX) / oldScale + view.x;
+  const wy = (CY - my) / oldScale + view.y;
+  view.zoom = Math.max(0.35, Math.min(10, view.zoom * factor));
+  const newScale = scale();
+  view.x = wx - (mx - CX) / newScale;
+  view.y = wy - (CY - my) / newScale;
+  updateViewChip(); draw();
+}
+function canvasPoint(e){
+  const r = cv.getBoundingClientRect();
+  return {x:(e.clientX - r.left) * (W / r.width), y:(e.clientY - r.top) * (H / r.height)};
+}
+function pointDistance(a, b){ return Math.hypot(a.x - b.x, a.y - b.y); }
+function pointMid(a, b){ return {x:(a.x + b.x) / 2, y:(a.y + b.y) / 2}; }
 
 function esc(s){ return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
 function status(m){ document.getElementById("chip-status").textContent = m; }
@@ -214,6 +263,7 @@ document.getElementById("reset").onclick = async () => {
   QUOTE = "";
   await act("reset", {});
 };
+document.getElementById("view-reset").onclick = resetView;
 document.getElementById("file").onchange = e => { if(e.target.files[0]) loadFile(e.target.files[0]); };
 window.addEventListener("dragover", e => e.preventDefault());
 window.addEventListener("drop", e => { e.preventDefault(); if(e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]); });
@@ -223,21 +273,102 @@ function loadFile(f){
   rd.readAsText(f);
 }
 
-cv.onclick = e => {
-  if(!SNAP) return;
-  const r = cv.getBoundingClientRect();
-  const mx = (e.clientX - r.left) * (W / r.width), my = (e.clientY - r.top) * (H / r.height);
+function pickAt(e){
+  if(!SNAP) return null;
+  const p = canvasPoint(e), r = cv.getBoundingClientRect();
+  const tolerance = 14 * W / r.width;
   let best = null, bd = 1e9;
   for(const h of hitmap){
-    const d = Math.hypot(h.x - mx, h.y - my);
-    if(d < h.r && d < bd){ bd = d; best = h; }
+    const d = Math.hypot(h.x - p.x, h.y - p.y);
+    if(d < Math.max(h.r, tolerance) && d < bd){ bd = d; best = h; }
   }
-  if(best){
-    if(best.kind === "ship") sel.ship = best.id;
-    else { sel.body = best.id; if(SNAP.ports[best.id]) sel.port = best.id; }
-    render();
+  return best;
+}
+function selectHit(hit){
+  if(!hit) return;
+  if(hit.kind === "ship"){
+    const ship = SNAP.ships.find(s => s.id === hit.id);
+    sel.ship = hit.id;
+    if(ship && ship.at) sel.body = ship.at;
+  } else {
+    sel.body = hit.id;
+    if(SNAP.ports[hit.id]) sel.port = hit.id;
   }
-};
+  render();
+}
+function focusSelection(){
+  const body = bodyById(sel.body);
+  const ship = SNAP.ships.find(s => s.id === sel.ship);
+  const target = body || ship;
+  if(!target) return;
+  view.x = target.x; view.y = target.y;
+  view.zoom = Math.max(view.zoom, body && body.parent ? 4 : 2.2);
+  updateViewChip(); draw();
+}
+cv.addEventListener("pointerdown", e => {
+  if(!SNAP) return;
+  cv.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+  if(pointers.size === 1){
+    cv.classList.add("dragging");
+    gesture = {mode:"pan", startX:e.clientX, startY:e.clientY,
+      lastX:e.clientX, lastY:e.clientY, moved:false};
+  } else if(pointers.size === 2){
+    const [a, b] = [...pointers.values()];
+    gesture = {mode:"pinch", distance:pointDistance(a, b), moved:true};
+  }
+});
+cv.addEventListener("pointermove", e => {
+  if(!pointers.has(e.pointerId) || !gesture) return;
+  pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+  if(gesture.mode === "pan"){
+    const dx = e.clientX - gesture.lastX, dy = e.clientY - gesture.lastY;
+    if(Math.hypot(e.clientX - gesture.startX, e.clientY - gesture.startY) > 5)
+      gesture.moved = true;
+    if(gesture.moved){
+      view.x -= dx / scale(); view.y += dy / scale();
+      updateViewChip(); draw();
+    }
+    gesture.lastX = e.clientX; gesture.lastY = e.clientY;
+  } else if(gesture.mode === "pinch" && pointers.size >= 2){
+    const [a, b] = [...pointers.values()];
+    const distance = pointDistance(a, b);
+    if(gesture.distance > 0 && distance > 0){
+      const mid = pointMid(a, b);
+      zoomAt(mid.x, mid.y, distance / gesture.distance);
+    }
+    gesture.distance = distance;
+  }
+});
+function endPointer(e){
+  if(!pointers.has(e.pointerId)) return;
+  const wasPan = gesture && gesture.mode === "pan" && !gesture.moved;
+  pointers.delete(e.pointerId);
+  if(wasPan) selectHit(pickAt(e));
+  if(pointers.size === 0) gesture = null;
+  else if(gesture && gesture.mode === "pinch") gesture = {mode:"pan", startX:e.clientX, startY:e.clientY,
+    lastX:e.clientX, lastY:e.clientY, moved:true};
+  cv.classList.remove("dragging");
+}
+cv.addEventListener("pointerup", endPointer);
+cv.addEventListener("pointercancel", endPointer);
+cv.addEventListener("wheel", e => {
+  e.preventDefault();
+  zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.001));
+}, {passive:false});
+cv.addEventListener("dblclick", e => {
+  const hit = pickAt(e);
+  if(hit){ selectHit(hit); focusSelection(); }
+});
+window.addEventListener("keydown", e => {
+  if(["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
+  if(e.key === "0") resetView();
+  else if(e.key === "+" || e.key === "="){
+    const r = cv.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1.2);
+  } else if(e.key === "-"){
+    const r = cv.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1 / 1.2);
+  } else if(e.key.toLowerCase() === "f") focusSelection();
+});
 
 function bodyById(id){ return SNAP.bodies.find(b => b.id === id); }
 
@@ -249,11 +380,12 @@ function draw(){
     ctx.fillText("drop a snapshot.json anywhere on this page", CX, CY);
     return;
   }
+  const drawScale = scale(), sunX = px(0), sunY = py(0);
   ctx.strokeStyle = "rgba(242,230,166,.22)"; ctx.lineWidth = 1;
   for(const b of SNAP.bodies){
     if(b.parent) continue;
     if((b.a || 0) <= 0) continue;
-    ctx.beginPath(); ctx.arc(CX, CY, b.a * SC, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(sunX, sunY, b.a * drawScale, 0, Math.PI * 2); ctx.stroke();
   }
   for(const p of SNAP.bodies){
     if(p.a <= 0 && !p.parent) continue;
@@ -261,7 +393,7 @@ function draw(){
     if(!kids.length) continue;
     for(const b of kids){
       ctx.strokeStyle = "rgba(242,230,166,.14)";
-      ctx.beginPath(); ctx.arc(px(p.x), py(p.y), b.a * SC, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(px(p.x), py(p.y), b.a * drawScale, 0, Math.PI * 2); ctx.stroke();
     }
   }
   for(const s of SNAP.ships){
@@ -316,11 +448,12 @@ function draw(){
     ctx.fillText(tag, X + 9, Y - 8);
     hitmap.push({kind:"ship", id:s.id, x:X, y:Y, r:12});
   }
+  updateViewChip();
 }
 
-function destOptions(cur){
+function destOptions(cur, selected){
   return SNAP.bodies.filter(b => b.id !== "sun" && b.id !== cur)
-    .map(b => `<option value="${b.id}">${b.id[0].toUpperCase() + b.id.slice(1)}</option>`).join("");
+    .map(b => `<option value="${b.id}"${b.id === selected ? " selected" : ""}>${b.id[0].toUpperCase() + b.id.slice(1)}</option>`).join("");
 }
 function locOptions(body){
   return (SNAP.locations || []).filter(l => l.body === body)
@@ -334,11 +467,13 @@ function shipPanel(){
   const bar = s.leg ? `<div class="bar"><i style="width:${(s.progress * 100).toFixed(1)}%"></i></div>
     <div class="tape">${(s.progress * 100).toFixed(1)}% · ETA ${s.eta_d.toFixed(1)}d</div>` : "";
   const cargo = Object.entries(s.cargo || {}).map(([c, q]) => `${esc(c)} ${q}t`).join(" · ") || "<span class='dim'>empty hold</span>";
+  const target = sel.body && sel.body !== "sun" && sel.body !== s.at ? bodyById(sel.body) : null;
   let h = `<div class="rowline"><span class="cname">◆ ${esc(s.id.toUpperCase())}</span><span class="tape">${status}</span></div>${bar}
     <div class="rowline"><span>hold</span><span>${cargo} <span class="dim">/ ${s.cargo_cap}t</span></span></div>
     <div class="rowline"><span>tank</span><span>${s.dv} <span class="dim">/ ${s.dv_cap} dv</span></span></div>`;
   if(LIVE && !s.leg){
-    h += `<div class="ctl"><select id="c-dest">${destOptions(s.at)}</select>
+    const targetHint = target ? `<div class="rowline"><span class="tape">selected destination</span><span><b>${esc(target.id[0].toUpperCase() + target.id.slice(1))}</b> <button class="btn small ghost" id="c-plan-target">Plan selected orbit</button></span></div>` : "";
+    h += targetHint + `<div class="ctl"><select id="c-dest">${destOptions(s.at, sel.body)}</select>
       <label class="mini"><input type="checkbox" id="c-surf"> surface</label>
       <input type="number" id="c-by" placeholder="arrive by t=" style="width:110px">
       <button class="btn small ghost" id="c-prev">Preview</button>
@@ -416,18 +551,26 @@ function contactPanel(){
   return h;
 }
 
+function orbitPayload(ship, dest){
+  const by = parseFloat(document.getElementById("c-by").value);
+  return {ship:ship.id, dest,
+    dest_loc: document.getElementById("c-surf").checked ? dest + "-surface" : null,
+    arrive_by: isNaN(by) ? null : by};
+}
+async function plotOrbit(ship, dest){
+  const r = await act("plot", orbitPayload(ship, dest));
+  if(r) PREVIEW = r.summary;
+  render();
+}
+
 function wireLive(){
   if(!LIVE) return;
   const on = (id, fn) => { const el = document.getElementById(id); if(el) el.onclick = fn; };
   const ship = SNAP.ships.find(x => x.id === sel.ship) || SNAP.ships[0];
-  on("c-prev", async () => {
-    const dest = document.getElementById("c-dest").value;
-    const by = parseFloat(document.getElementById("c-by").value);
-    const r = await act("plot", {ship: ship.id, dest,
-      dest_loc: document.getElementById("c-surf").checked ? dest + "-surface" : null,
-      arrive_by: isNaN(by) ? null : by});
-    if(r) PREVIEW = r.summary;
-    render();
+  on("c-prev", () => plotOrbit(ship, document.getElementById("c-dest").value));
+  on("c-plan-target", () => {
+    if(sel.body && sel.body !== "sun" && sel.body !== ship.at)
+      plotOrbit(ship, sel.body);
   });
   on("c-go", async () => {
     const dest = document.getElementById("c-dest").value;
