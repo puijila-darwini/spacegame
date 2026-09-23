@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sol Merchant — system view</title>
+<style>
+  :root{
+    --phthalo:#0B1F1A; --phthalo2:#0E2A23; --straw:#F2E6A6; --royal:#6B3FA0;
+    --straw-dim:rgba(242,230,166,.28); --straw-faint:rgba(242,230,166,.12);
+    --ink:#EDE7C8; --mut:#9AA48F;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; color:var(--ink);
+    font:14px/1.45 "Segoe UI", system-ui, sans-serif;
+    background:
+      radial-gradient(1100px 500px at 12% -6%, rgba(107,63,160,.34), transparent 60%),
+      radial-gradient(900px 600px at 88% 8%, rgba(242,230,166,.10), transparent 55%),
+      repeating-linear-gradient(135deg, transparent 0 26px, rgba(242,230,166,.028) 26px 27px),
+      var(--phthalo);
+    min-height:100vh;
+  }
+  header.band{
+    background:linear-gradient(100deg, var(--royal) 0%, #3d2560 34%, var(--phthalo2) 72%, var(--phthalo) 100%);
+    border-bottom:2px solid var(--straw);
+    padding:14px 22px 12px;
+  }
+  header.band h1{margin:0; font-size:20px; letter-spacing:3px; color:var(--straw)}
+  header.band h1 .chev{color:var(--straw); font-size:15px; letter-spacing:0}
+  .oration{margin:2px 0 0; font:italic 15px Georgia, "Times New Roman", serif; color:var(--ink); opacity:.92}
+  .toolbar{display:flex; gap:10px; align-items:center; padding:10px 22px; flex-wrap:wrap}
+  .chip{
+    display:inline-block; padding:3px 12px; border:1px solid var(--straw-dim);
+    border-radius:999px; color:var(--straw); font-size:12.5px; background:rgba(242,230,166,.06);
+  }
+  .chip.live{background:var(--royal); border-color:var(--royal); color:#fff}
+  .btn{
+    font:600 13px/1 "Segoe UI", system-ui, sans-serif; color:var(--phthalo);
+    background:linear-gradient(var(--straw), #d9c87e);
+    border:none; border-radius:7px 7px 0 0; padding:9px 16px 11px; cursor:pointer;
+    box-shadow:0 3px 0 #8a7a3a; position:relative;
+  }
+  .btn:active{transform:translateY(2px); box-shadow:0 1px 0 #8a7a3a}
+  .btn.ghost{background:transparent; color:var(--straw); box-shadow:none;
+    border:1px solid var(--straw-dim); border-radius:7px; padding:8px 14px}
+  .btn.small{padding:5px 10px 7px; font-size:12px}
+  main{display:grid; grid-template-columns:minmax(560px,1fr) 380px; gap:14px; padding:0 22px 22px}
+  @media (max-width:1000px){main{grid-template-columns:1fr}}
+  .card{
+    background:linear-gradient(180deg, rgba(20,44,37,.92), rgba(11,31,26,.94));
+    border-top:4px solid var(--royal); border-left:4px solid var(--royal);
+    border-bottom:2px solid var(--straw);
+    border-right:1px solid rgba(242,230,166,.15);
+    border-radius:2px 14px 2px 14px; padding:0 0 12px; margin-bottom:14px;
+    box-shadow:0 6px 18px rgba(0,0,0,.45);
+  }
+  .pill{
+    display:inline-flex; align-items:center; gap:8px; margin:10px 0 4px 12px;
+    background:var(--royal); color:#fff; font-weight:700; font-size:12px; letter-spacing:2px;
+    padding:5px 6px 5px 14px; border-radius:999px;
+  }
+  .pill::after{content:""; width:14px; height:14px; background:var(--straw);
+    clip-path:polygon(0 0, 100% 50%, 0 100%); margin-right:2px}
+  .card .body{padding:2px 14px}
+  canvas#sys{width:100%; height:auto; display:block; cursor:crosshair;
+    background:radial-gradient(closest-side, rgba(242,230,166,.05), transparent 70%)}
+  table.book{width:100%; border-collapse:collapse; font-size:12.5px; margin:4px 0 8px}
+  table.book td, table.book th{padding:2px 6px; text-align:right; border-bottom:1px dashed rgba(242,230,166,.12)}
+  table.book td:first-child, table.book th:first-child{text-align:left}
+  table.book th{color:var(--mut); font-weight:600; font-size:11px; letter-spacing:1px}
+  tr.unknown td{opacity:.34; font-style:italic}
+  .bid{color:#b7e4a8}.ask{color:var(--straw)}
+  .tape{font-size:12px; color:var(--mut)}
+  .bar{height:8px; background:rgba(242,230,166,.12); border-radius:99px; overflow:hidden; min-width:70px}
+  .bar > i{display:block; height:100%; background:linear-gradient(90deg, var(--royal), var(--straw))}
+  .badge{display:inline-block; font-size:10.5px; font-weight:700; letter-spacing:1px;
+    padding:1px 8px 1px 6px; margin-right:6px; color:var(--phthalo); background:var(--straw);
+    clip-path:polygon(0 0, calc(100% - 8px) 0, 100% 50%, calc(100% - 8px) 100%, 0 100%)}
+  .badge.royal{background:var(--royal); color:#fff}
+  .badge.ghostb{background:transparent; color:var(--straw); border:1px solid var(--straw-dim)}
+  .ledger div{font-size:12.5px; margin:5px 0}
+  .ledger .lt{color:var(--mut); font-size:11px; margin-right:6px}
+  .foot{padding:0 22px 26px; color:var(--mut); font-size:12px}
+  .rowline{display:flex; justify-content:space-between; align-items:center; gap:8px; padding:2px 0}
+  .cname{font-weight:600}
+  .dim{opacity:.55}
+  .ctl{display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin:6px 0}
+  select, input[type=number], input[type=text]{
+    background:var(--phthalo2); color:var(--ink); border:1px solid var(--straw-dim);
+    border-radius:6px; padding:5px 8px; font-size:12.5px; max-width:130px;
+  }
+  label.mini{font-size:11.5px; color:var(--mut)}
+  #file{display:none}
+  .preview{background:rgba(107,63,160,.18); border-left:3px solid var(--royal);
+    padding:4px 8px; font-size:12px; margin:4px 0; white-space:pre-wrap}
+</style>
+</head>
+<body>
+<header class="band">
+  <h1><span class="chev">◆◆</span> SOL MERCHANT <span class="chev">◆◆</span></h1>
+  <p class="oration">Put capital somewhere in the galaxy — wait weeks — find out what happened.</p>
+</header>
+<div class="toolbar">
+  <button class="btn ghost" id="adv1" hidden>+1d</button>
+  <button class="btn ghost" id="adv7" hidden>+7d</button>
+  <button class="btn ghost" id="reload">Reload snapshot.json</button>
+  <label class="btn ghost" for="file">Load snapshot file…</label>
+  <input type="file" id="file" accept=".json,application/json">
+  <button class="btn ghost" id="reset">Reset game</button>
+  <span class="chip" id="chip-mode">file mode</span>
+  <span class="chip" id="chip-t">t = —</span>
+  <span class="chip" id="chip-cr">— cr</span>
+  <span class="chip" id="chip-status">no snapshot</span>
+</div>
+<main>
+  <div>
+    <div class="card">
+      <span class="pill">SYSTEM VIEW</span>
+      <div class="body"><canvas id="sys" width="860" height="680"></canvas></div>
+    </div>
+    <div class="card">
+      <span class="pill">LEDGER</span>
+      <div class="body ledger" id="p-ledger"></div>
+    </div>
+  </div>
+  <div>
+    <div class="card">
+      <span class="pill">SHIP</span>
+      <div class="body" id="p-ship"></div>
+    </div>
+    <div class="card">
+      <span class="pill">PORT</span>
+      <div class="body" id="p-port"></div>
+    </div>
+    <div class="card">
+      <span class="pill">CONTRACTS</span>
+      <div class="body" id="p-contracts"></div>
+    </div>
+    <div class="card">
+      <span class="pill">CONTACTS</span>
+      <div class="body" id="p-contacts"></div>
+    </div>
+  </div>
+</main>
+<p class="foot" id="foot">Drop a snapshot.json anywhere on this page, or serve the live backend.</p>
+<script>
+"use strict";
+let SNAP = null, LIVE = false, PREVIEW = "", QUOTE = "";
+const sel = { body: "tide", ship: "pc1", port: "tide" };
+const STRAW = "#F2E6A6", ROYAL = "#6B3FA0";
+const cv = document.getElementById("sys"), ctx = cv.getContext("2d");
+const W = cv.width, H = cv.height, CX = W / 2, CY = H / 2;
+const SC = Math.min(W, H) / 2 / 9.9; // MUD-literal radii: Fulmaior rides at 9.43
+const px = x => CX + x * SC, py = y => CY - y * SC;
+let hitmap = [];
+
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function status(m){ document.getElementById("chip-status").textContent = m; }
+
+async function act(action, payload){
+  const r = await fetch("/api/" + action, {method:"POST",
+    headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload || {})});
+  const j = await r.json();
+  if(!j.ok){ status("ERR: " + j.error); return null; }
+  status("ok · t=" + j.snapshot.t + "d");
+  SNAP = j.snapshot;
+  render();
+  return j.result;
+}
+
+async function boot(fromPoll){
+  // live backend wins; otherwise fall back to the static file
+  try{
+    const r = await fetch("/api/snapshot", {cache:"no-store"});
+    if(r.ok){
+      SNAP = await r.json();
+      if(!LIVE){ LIVE = true; setLiveUI(); poll(); }
+      if(!fromPoll) status("live");
+      render();
+      return;
+    }
+  }catch(e){ /* no backend */ }
+  if(!SNAP && !fromPoll){
+    try{
+      const r = await fetch("snapshot.json", {cache:"no-store"});
+      if(r.ok){ SNAP = await r.json(); status("snapshot.json"); }
+    }catch(e){ /* file mode via loader */ }
+    render();
+  }
+}
+function setLiveUI(){
+  document.getElementById("chip-mode").textContent = "● LIVE";
+  document.getElementById("chip-mode").classList.add("live");
+  document.getElementById("adv1").hidden = false;
+  document.getElementById("adv7").hidden = false;
+  document.getElementById("foot").textContent =
+    "Live game — every action posts to the sim and saves. Reset game replaces the live save with a new default campaign.";
+}
+function poll(){ setInterval(async () => {
+  if(document.activeElement && document.activeElement.closest(".card")) return; // don't clobber inputs
+  try{
+    const r = await fetch("/api/snapshot", {cache:"no-store"});
+    if(r.ok){ SNAP = await r.json(); render(); }
+  }catch(e){}
+}, 2500); }
+document.getElementById("reload").onclick = () => boot(false);
+document.getElementById("adv1").onclick = () => act("advance", {days: 1});
+document.getElementById("adv7").onclick = () => act("advance", {days: 7});
+document.getElementById("reset").onclick = async () => {
+  if(!LIVE){ status("Reset game requires the live server"); return; }
+  if(!confirm("Reset the live game? This replaces the current campaign save.")) return;
+  PREVIEW = "";
+  QUOTE = "";
+  await act("reset", {});
+};
+document.getElementById("file").onchange = e => { if(e.target.files[0]) loadFile(e.target.files[0]); };
+window.addEventListener("dragover", e => e.preventDefault());
+window.addEventListener("drop", e => { e.preventDefault(); if(e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]); });
+function loadFile(f){
+  const rd = new FileReader();
+  rd.onload = () => { SNAP = JSON.parse(rd.result); status(f.name); render(); };
+  rd.readAsText(f);
+}
+
+cv.onclick = e => {
+  if(!SNAP) return;
+  const r = cv.getBoundingClientRect();
+  const mx = (e.clientX - r.left) * (W / r.width), my = (e.clientY - r.top) * (H / r.height);
+  let best = null, bd = 1e9;
+  for(const h of hitmap){
+    const d = Math.hypot(h.x - mx, h.y - my);
+    if(d < h.r && d < bd){ bd = d; best = h; }
+  }
+  if(best){
+    if(best.kind === "ship") sel.ship = best.id;
+    else { sel.body = best.id; if(SNAP.ports[best.id]) sel.port = best.id; }
+    render();
+  }
+};
+
+function bodyById(id){ return SNAP.bodies.find(b => b.id === id); }
+
+function draw(){
+  ctx.clearRect(0, 0, W, H);
+  hitmap = [];
+  if(!SNAP){
+    ctx.fillStyle = STRAW; ctx.font = "italic 22px Georgia, serif"; ctx.textAlign = "center";
+    ctx.fillText("drop a snapshot.json anywhere on this page", CX, CY);
+    return;
+  }
+  ctx.strokeStyle = "rgba(242,230,166,.22)"; ctx.lineWidth = 1;
+  for(const b of SNAP.bodies){
+    if(b.parent) continue;
+    if((b.a || 0) <= 0) continue;
+    ctx.beginPath(); ctx.arc(CX, CY, b.a * SC, 0, Math.PI * 2); ctx.stroke();
+  }
+  for(const p of SNAP.bodies){
+    if(p.a <= 0 && !p.parent) continue;
+    const kids = SNAP.bodies.filter(b => b.parent === p.id);
+    if(!kids.length) continue;
+    for(const b of kids){
+      ctx.strokeStyle = "rgba(242,230,166,.14)";
+      ctx.beginPath(); ctx.arc(px(p.x), py(p.y), b.a * SC, 0, Math.PI * 2); ctx.stroke();
+    }
+  }
+  for(const s of SNAP.ships){
+    if(!s.leg || !s.arc_pts.length) continue;
+    ctx.strokeStyle = "rgba(242,230,166,.55)"; ctx.setLineDash([5, 4]); ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    s.arc_pts.forEach((p, i) => { const X = px(p[0]), Y = py(p[1]); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+  for(const s of SNAP.ships){
+    if(!s.leg || s.arc_pts.length) continue;
+    const a = bodyById(s.leg.from), b = bodyById(s.leg.to);
+    if(!a || !b) continue;
+    ctx.strokeStyle = "rgba(107,63,160,.9)"; ctx.setLineDash([2, 3]); ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(px(a.x), py(a.y)); ctx.lineTo(px(b.x), py(b.y)); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  for(const b of SNAP.bodies){
+    const X = px(b.x), Y = py(b.y);
+    let r = 6;
+    if(b.id === "sun") r = 11;
+    else if(b.id === "fulmaior") r = 8;
+    else if(b.parent) r = 3.4;
+    if(b.id === "sun"){
+      const g = ctx.createRadialGradient(X, Y, 1, X, Y, 26);
+      g.addColorStop(0, STRAW); g.addColorStop(1, "rgba(242,230,166,0)");
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(X, Y, 26, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.fillStyle = b.id === "sun" ? STRAW : (b.parent ? "#cdbf85" : STRAW);
+    ctx.beginPath(); ctx.arc(X, Y, r, 0, Math.PI * 2); ctx.fill();
+    if(sel.body === b.id || sel.port === b.id){
+      ctx.strokeStyle = ROYAL; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(X, Y, r + 5, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.fillStyle = "rgba(237,231,200,.85)"; ctx.font = "11px sans-serif"; ctx.textAlign = "left";
+    ctx.fillText(b.id === "sun" ? "Sun" : b.id[0].toUpperCase() + b.id.slice(1), X + r + 4, Y + 4);
+    hitmap.push({kind:"body", id:b.id, x:X, y:Y, r:Math.max(12, r + 6)});
+  }
+  for(const s of SNAP.ships){
+    const X = px(s.x), Y = py(s.y);
+    ctx.fillStyle = ROYAL;
+    ctx.beginPath();
+    ctx.moveTo(X, Y - 8); ctx.lineTo(X + 6, Y + 5); ctx.lineTo(X, Y + 2); ctx.lineTo(X - 6, Y + 5);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = STRAW; ctx.lineWidth = 1; ctx.stroke();
+    if(sel.ship === s.id){
+      ctx.strokeStyle = STRAW; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.arc(X, Y, 13, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.fillStyle = STRAW; ctx.font = "bold 11px sans-serif"; ctx.textAlign = "left";
+    const tag = s.leg ? `${s.id.toUpperCase()} · ETA ${s.eta_d.toFixed(1)}d` : s.id.toUpperCase();
+    ctx.fillText(tag, X + 9, Y - 8);
+    hitmap.push({kind:"ship", id:s.id, x:X, y:Y, r:12});
+  }
+}
+
+function destOptions(cur){
+  return SNAP.bodies.filter(b => b.id !== "sun" && b.id !== cur)
+    .map(b => `<option value="${b.id}">${b.id[0].toUpperCase() + b.id.slice(1)}</option>`).join("");
+}
+function locOptions(body){
+  return (SNAP.locations || []).filter(l => l.body === body)
+    .map(l => `<option value="${l.id}">${esc(l.name)}</option>`).join("");
+}
+
+function shipPanel(){
+  const s = SNAP.ships.find(x => x.id === sel.ship) || SNAP.ships[0];
+  if(!s) return "<span class='dim'>no ships</span>";
+  const status = s.leg ? `en route <b>${esc(s.leg.from)} → ${esc(s.leg.to)}</b>` : `parked at <b>${esc(s.loc || s.at || "?")}</b>`;
+  const bar = s.leg ? `<div class="bar"><i style="width:${(s.progress * 100).toFixed(1)}%"></i></div>
+    <div class="tape">${(s.progress * 100).toFixed(1)}% · ETA ${s.eta_d.toFixed(1)}d</div>` : "";
+  const cargo = Object.entries(s.cargo || {}).map(([c, q]) => `${esc(c)} ${q}t`).join(" · ") || "<span class='dim'>empty hold</span>";
+  let h = `<div class="rowline"><span class="cname">◆ ${esc(s.id.toUpperCase())}</span><span class="tape">${status}</span></div>${bar}
+    <div class="rowline"><span>hold</span><span>${cargo} <span class="dim">/ ${s.cargo_cap}t</span></span></div>
+    <div class="rowline"><span>tank</span><span>${s.dv} <span class="dim">/ ${s.dv_cap} dv</span></span></div>`;
+  if(LIVE && !s.leg){
+    h += `<div class="ctl"><select id="c-dest">${destOptions(s.at)}</select>
+      <label class="mini"><input type="checkbox" id="c-surf"> surface</label>
+      <input type="number" id="c-by" placeholder="arrive by t=" style="width:110px">
+      <button class="btn small ghost" id="c-prev">Preview</button>
+      <button class="btn small" id="c-go">Commit</button></div>
+      <div class="ctl"><select id="c-loc">${locOptions(s.at)}</select>
+      <button class="btn small ghost" id="c-transfer">Move here</button>
+      <button class="btn small ghost" id="c-fuel">Refuel</button></div>
+      ${PREVIEW ? `<div class="preview">${esc(PREVIEW)}</div>` : ""}`;
+  }
+  return h;
+}
+
+function bookTable(side, lines){
+  if(!lines || !Object.keys(lines).length) return "<span class='dim'>—</span>";
+  let h = "";
+  for(const [comm, rows] of Object.entries(lines)){
+    h += `<tr><th colspan="3" style="text-align:left;color:var(--straw)">${esc(comm)}</th></tr>`;
+    for(const [p, q, party, known] of rows){
+      const who = known ? esc(party) : "<span class='dim'>unknown counterparty</span>";
+      h += `<tr class="${known ? "" : "unknown"}"><td class="${side === "asks" ? "ask" : "bid"}">${p}</td><td>${q}t</td><td>${who}</td></tr>`;
+    }
+  }
+  return `<table class="book">${h}</table>`;
+}
+
+function portPanel(){
+  const p = SNAP.ports[sel.port];
+  if(!p) return "<span class='dim'>click a port world</span>";
+  const last = Object.entries(p.last || {}).filter(([, v]) => v)
+    .map(([c, v]) => `${esc(c)} ${v.side} ${v.qty}t @ ${v.price} (${v.t}d)`).join("<br>") || "<span class='dim'>no trades taped</span>";
+  let h = `<div class="rowline"><span class="cname">◆ ${esc(sel.port.toUpperCase())}</span></div>`;
+  if(LIVE){
+    const comms = Object.keys(p.asks).map(c => `<option>${c}</option>`).join("");
+    h += `<div class="ctl"><select id="c-comm">${comms}</select>
+      <input type="number" id="c-qty" value="5" style="width:70px">
+      <button class="btn small" id="c-buy">Buy</button>
+      <button class="btn small ghost" id="c-sell">Sell</button></div>`;
+  }
+  h += `<div class="tape">ASKS</div>${bookTable("asks", p.asks)}
+    <div class="tape">BIDS</div>${bookTable("bids", p.bids)}
+    <div class="tape">TAPE</div><div class="tape">${last}</div>`;
+  return h;
+}
+
+function contractPanel(){
+  if(!SNAP.contracts.length) return "<span class='dim'>no contracts posted</span>";
+  return SNAP.contracts.map(c => {
+    const issuer = c.known ? esc(c.issuer) : "<span class='dim'>··· unknown issuer</span>";
+    const cls = c.status === "filled" ? "" : (c.status === "lapsed" ? "ghostb" : "royal");
+    let btns = "";
+    if(LIVE && c.status === "open") btns = ` <button class="btn small ghost" data-accept="${c.id}">Accept</button>`;
+    if(LIVE && c.status === "accepted") btns = ` <button class="btn small ghost" data-fulfill="${c.id}">Fulfill</button>`;
+    return `<div class="rowline"><span><span class="badge ${cls}">${esc(c.status.toUpperCase())}</span>
+      <b>${esc(c.id)}</b> ${c.qty}t ${esc(c.comm)} → ${esc(c.dest)} @ ${c.price}${btns}</span></div>
+      <div class="tape">${issuer} · by t=${c.deadline} · delivered ${c.delivered}t</div>`;
+  }).join("");
+}
+
+function ledgerPanel(){
+  const items = SNAP.ledger.slice(-12).reverse();
+  if(!items.length) return "<span class='dim'>quiet… for now</span>";
+  const cls = {arrival:"", event:"royal", contact:"ghostb", contract:"ghostb", service:"ghostb"};
+  return items.map(e => `<div><span class="lt">t=${e.t}</span><span class="badge ${cls[e.kind] || ""}">${esc((e.kind || "?").toUpperCase())}</span>${esc(e.msg)}</div>`).join("");
+}
+
+function contactPanel(){
+  if(!SNAP.contacts.length) return "<span class='dim'>no contacts yet</span>";
+  let h = SNAP.contacts.map(n => `<div class="rowline"><span><span class="cname">${esc(n.name)}</span>
+    <span class="dim">· ${esc(n.occupation)} (${esc(n.port)})</span></span></div>
+    <div class="rowline"><span class="bar"><i style="width:${n.rapport}%"></i></span>
+    <span class="tape">rap ${n.rapport} · rel ${Math.round(n.reliability * 100)}%${
+      LIVE ? ` <button class="btn small ghost" data-refer="${n.id}">Refer</button>
+      <button class="btn small ghost" data-quote="${n.id}">Quote</button>` : ""}</span></div>`).join("");
+  if(QUOTE) h += `<div class="preview">${esc(QUOTE)}</div>`;
+  return h;
+}
+
+function wireLive(){
+  if(!LIVE) return;
+  const on = (id, fn) => { const el = document.getElementById(id); if(el) el.onclick = fn; };
+  const ship = SNAP.ships.find(x => x.id === sel.ship) || SNAP.ships[0];
+  on("c-prev", async () => {
+    const dest = document.getElementById("c-dest").value;
+    const by = parseFloat(document.getElementById("c-by").value);
+    const r = await act("plot", {ship: ship.id, dest,
+      dest_loc: document.getElementById("c-surf").checked ? dest + "-surface" : null,
+      arrive_by: isNaN(by) ? null : by});
+    if(r) PREVIEW = r.summary;
+    render();
+  });
+  on("c-go", async () => {
+    const dest = document.getElementById("c-dest").value;
+    const by = parseFloat(document.getElementById("c-by").value);
+    PREVIEW = "";
+    await act("commit", {ship: ship.id, dest,
+      dest_loc: document.getElementById("c-surf").checked ? dest + "-surface" : null,
+      arrive_by: isNaN(by) ? null : by});
+  });
+  on("c-transfer", async () => {
+    await act("transfer", {ship: ship.id, loc: document.getElementById("c-loc").value});
+  });
+  on("c-fuel", async () => { await act("refuel", {ship: ship.id}); });
+  on("c-buy", async () => {
+    await act("buy", {ship: ship.id, comm: document.getElementById("c-comm").value,
+      qty: parseFloat(document.getElementById("c-qty").value) || 1});
+  });
+  on("c-sell", async () => {
+    await act("sell", {ship: ship.id, comm: document.getElementById("c-comm").value,
+      qty: parseFloat(document.getElementById("c-qty").value) || 1});
+  });
+  document.querySelectorAll("[data-accept]").forEach(b => b.onclick = () => act("accept", {cid: b.dataset.accept}));
+  document.querySelectorAll("[data-fulfill]").forEach(b => b.onclick = () => act("fulfill", {ship: ship.id, cid: b.dataset.fulfill}));
+  document.querySelectorAll("[data-refer]").forEach(b => b.onclick = () => act("refer", {npc: b.dataset.refer}));
+  document.querySelectorAll("[data-quote]").forEach(b => b.onclick = async () => {
+    const r = await act("quote", {npc: b.dataset.quote});
+    if(r) QUOTE = `${r.by} (${r.port}, ${r.confidence} confidence): ` +
+      Object.entries(r.quotes).map(([c, q]) => `${c} ask ${q.ask ?? "—"} / bid ${q.bid ?? "—"}`).join(" · ");
+    render();
+  });
+}
+
+function render(){
+  draw();
+  if(!SNAP) return;
+  document.getElementById("chip-t").textContent = "t = " + SNAP.t + "d";
+  document.getElementById("chip-cr").textContent = SNAP.credits.toLocaleString() + " cr";
+  document.getElementById("p-ship").innerHTML = shipPanel();
+  document.getElementById("p-port").innerHTML = portPanel();
+  document.getElementById("p-contracts").innerHTML = contractPanel();
+  document.getElementById("p-ledger").innerHTML = ledgerPanel();
+  document.getElementById("p-contacts").innerHTML = contactPanel();
+  wireLive();
+}
+boot(false);
+</script>
+</body>
+</html>

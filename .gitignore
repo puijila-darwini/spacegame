@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local game state and development scratch
+web/live.json
+tmp/
+sim/api.py.new
+run_tests.py
+
+# Box-local agent configuration
+AGENTS.md
+opencode.json
