@@ -23,11 +23,11 @@ from .state import Game
 
 SNAPSHOT_VERSION = 3
 
-# Renderer-side local geometry. These are deliberately tiny AU-scale offsets,
-# not navigation radii: they make stations/terminals/surfaces inspectable when
-# the camera zooms into a world without changing the movement simulation.
+# Renderer-side local geometry for stations and terminals. These are
+# deliberately tiny AU-scale offsets, not navigation radii: they make orbital
+# infrastructure inspectable when the camera zooms into a world without
+# changing the movement simulation. Surfaces remain body-anchored locations.
 LOCATION_ORBITS = {
-    "surface": (0.016, 1.1, 0.0),
     "terminal": (0.028, 1.8, 1.3),
     "station": (0.042, 2.6, 2.4),
 }
@@ -36,6 +36,8 @@ LOCATION_ORBITS = {
 def _location_pos(game: Game, loc: dict) -> tuple[float, float, float, float]:
     body = game.bodies[loc["body"]]
     bx, by, _ = orbits.body_pos(body, game.bodies, game.t)
+    if loc["kind"] == "surface":
+        return (bx, by, 0.0, 0.0)
     orbit_a, period_d, phase = LOCATION_ORBITS[loc["kind"]]
     angle = phase + math.tau * game.t / period_d
     return (bx + orbit_a * math.cos(angle),

@@ -176,6 +176,7 @@ const scale = () => BASE_SCALE * view.zoom;
 const px = x => CX + (x - view.x) * scale();
 const py = y => CY - (y - view.y) * scale();
 let hitmap = [];
+let DRAW_SNAP = null, transition = null;
 let gesture = null;
 const pointers = new Map();
 
@@ -216,10 +217,72 @@ async function act(action, payload){
   const j = await r.json();
   if(!j.ok){ status("ERR: " + j.error); return null; }
   status("ok · t=" + j.snapshot.t + "d");
-  SNAP = j.snapshot;
+  setSnapshot(j.snapshot, true);
   render();
   return j.result;
 }
+function pointOnArc(points, progress){
+  if(!points || !points.length) return null;
+  const at = Math.max(0, Math.min(1, progress)) * (points.length - 1);
+  const i = Math.min(points.length - 2, Math.floor(at));
+  const f = at - i;
+  return [points[i][0] + (points[i + 1][0] - points[i][0]) * f,
+          points[i][1] + (points[i + 1][1] - points[i][1]) * f];
+}
+function blendSnapshots(from, to, fraction){
+  const lerp = (a, b) => a + (b - a) * fraction;
+  const index = rows => new Map(rows.map(row => [row.id, row]));
+  const fromBodies = index(from.bodies || []), fromShips = index(from.ships || []);
+  const fromLocations = index(from.locations || []);
+  const blended = {...to};
+  blended.bodies = (to.bodies || []).map(body => {
+    const old = fromBodies.get(body.id);
+    return old ? {...body, x:lerp(old.x, body.x), y:lerp(old.y, body.y),
+      angle:lerp(old.angle, body.angle)} : body;
+  });
+  blended.ships = (to.ships || []).map(ship => {
+    const old = fromShips.get(ship.id);
+    if(!old) return ship;
+    const progress = lerp(old.progress, ship.progress);
+    const sameLeg = ship.leg && old.leg && ship.leg.from === old.leg.from && ship.leg.to === old.leg.to;
+    const arcPoint = sameLeg ? pointOnArc(ship.arc_pts, progress) : null;
+    return {...ship, x:arcPoint ? arcPoint[0] : lerp(old.x, ship.x),
+      y:arcPoint ? arcPoint[1] : lerp(old.y, ship.y), progress, eta_d:lerp(old.eta_d, ship.eta_d)};
+  });
+  blended.locations = (to.locations || []).map(loc => {
+    const old = fromLocations.get(loc.id);
+    return old ? {...loc, x:lerp(old.x, loc.x), y:lerp(old.y, loc.y),
+      orbit_angle:lerp(old.orbit_angle, loc.orbit_angle)} : loc;
+  });
+  return blended;
+}
+function setSnapshot(next, animate = true){
+  const previous = DRAW_SNAP || SNAP;
+  const oldTime = SNAP && Number.isFinite(SNAP.t) ? SNAP.t : null;
+  SNAP = next;
+  if(animate && previous && oldTime !== null && next.t > oldTime){
+    transition = {from:previous, to:next, start:performance.now(), duration:2400};
+    DRAW_SNAP = previous;
+  } else {
+    transition = null;
+    DRAW_SNAP = next;
+  }
+}
+function animateScene(now){
+  if(transition){
+    const fraction = Math.min(1, (now - transition.start) / transition.duration);
+    DRAW_SNAP = blendSnapshots(transition.from, transition.to, fraction);
+    draw();
+    if(fraction >= 1){
+      DRAW_SNAP = transition.to;
+      transition = null;
+      draw();
+    }
+  }
+  requestAnimationFrame(animateScene);
+}
+requestAnimationFrame(animateScene);
+
 function updateAutoUI(){
   const button = document.getElementById("auto");
   if(button) button.textContent = AUTO_ENABLED ? "Pause auto" : "Auto 1d/min";
@@ -244,7 +307,7 @@ async function boot(fromPoll){
   try{
     const r = await fetch("/api/snapshot", {cache:"no-store"});
     if(r.ok){
-      SNAP = await r.json();
+      setSnapshot(await r.json(), false);
       if(!LIVE){ LIVE = true; setLiveUI(); poll(); }
       if(!fromPoll) status("live");
       render();
@@ -254,7 +317,7 @@ async function boot(fromPoll){
   if(!SNAP && !fromPoll){
     try{
       const r = await fetch("snapshot.json", {cache:"no-store"});
-      if(r.ok){ SNAP = await r.json(); status("snapshot.json"); }
+      if(r.ok){ setSnapshot(await r.json(), false); status("snapshot.json"); }
     }catch(e){ /* file mode via loader */ }
     render();
   }
@@ -271,10 +334,10 @@ function setLiveUI(){
     "Live game — every action posts to the sim and saves. Reset game replaces the live save with a new default campaign.";
 }
 function poll(){ setInterval(async () => {
-  if(document.activeElement && document.activeElement.closest(".card")) return; // don't clobber inputs
+  if(!LIVE || (document.activeElement && document.activeElement.closest(".card"))) return; // don't clobber inputs
   try{
     const r = await fetch("/api/snapshot", {cache:"no-store"});
-    if(r.ok){ SNAP = await r.json(); render(); }
+    if(r.ok){ setSnapshot(await r.json(), true); render(); }
   }catch(e){}
 }, 2500); }
 document.getElementById("reload").onclick = () => boot(false);
@@ -296,7 +359,15 @@ window.addEventListener("dragover", e => e.preventDefault());
 window.addEventListener("drop", e => { e.preventDefault(); if(e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]); });
 function loadFile(f){
   const rd = new FileReader();
-  rd.onload = () => { SNAP = JSON.parse(rd.result); status(f.name); render(); };
+  rd.onload = () => {
+    LIVE = false;
+    document.getElementById("chip-mode").textContent = "file mode";
+    document.getElementById("chip-mode").classList.remove("live");
+    for(const id of ["adv1", "adv7", "adv30", "auto"]) document.getElementById(id).hidden = true;
+    setSnapshot(JSON.parse(rd.result), false);
+    status(f.name);
+    render();
+  };
   rd.readAsText(f);
 }
 
@@ -421,6 +492,7 @@ function bodyDisplayRadius(body, drawScale){
 }
 function drawLocationMarkers(){
   for(const loc of SNAP.locations || []){
+    if(loc.kind === "surface") continue;
     const selected = sel.location === loc.id;
     if(view.zoom < 1.15 && !selected) continue;
     const X = px(loc.x), Y = py(loc.y);
@@ -447,11 +519,14 @@ function drawLocationMarkers(){
 }
 
 function draw(){
+  const authoritative = SNAP;
+  if(DRAW_SNAP) SNAP = DRAW_SNAP;
   ctx.clearRect(0, 0, W, H);
   hitmap = [];
   if(!SNAP){
     ctx.fillStyle = STRAW; ctx.font = "italic 22px Georgia, serif"; ctx.textAlign = "center";
     ctx.fillText("drop a snapshot.json anywhere on this page", CX, CY);
+    SNAP = authoritative;
     return;
   }
   const drawScale = scale(), sunX = px(0), sunY = py(0);
@@ -471,6 +546,7 @@ function draw(){
     }
   }
   for(const loc of SNAP.locations || []){
+    if(loc.kind === "surface") continue;
     const parent = bodyById(loc.body);
     if(!parent) continue;
     const parentX = px(parent.x), parentY = py(parent.y);
@@ -533,6 +609,7 @@ function draw(){
     hitmap.push({kind:"ship", id:s.id, x:X, y:Y, r:12});
   }
   updateViewChip();
+  SNAP = authoritative;
 }
 
 function destOptions(cur, selected){
