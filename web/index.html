@@ -122,6 +122,7 @@
   <label class="btn ghost" for="file">Load snapshot file…</label>
   <input type="file" id="file" accept=".json,application/json">
   <button class="btn ghost" id="reset">Reset game</button>
+  <button class="btn ghost" id="view-system">System view</button>
   <button class="btn ghost" id="view-reset">Reset view</button>
   <span class="chip" id="chip-view">view 1.0×</span>
   <span class="chip" id="chip-mode">file mode</span>
@@ -134,7 +135,7 @@
     <div class="card">
       <span class="pill">SYSTEM VIEW</span>
       <div class="body"><canvas id="sys" width="860" height="680"></canvas>
-        <div class="canvas-help">Drag to pan · wheel or pinch to zoom · click a world or ship · double-click to focus</div>
+        <div class="canvas-help">Drag to pan · wheel or pinch to zoom · click a world or ship · double-click a world for system view</div>
       </div>
     </div>
     <div class="card">
@@ -193,7 +194,7 @@ function zoomAt(clientX, clientY, factor){
   const oldScale = scale();
   const wx = (mx - CX) / oldScale + view.x;
   const wy = (CY - my) / oldScale + view.y;
-  view.zoom = Math.max(0.35, Math.min(10, view.zoom * factor));
+  view.zoom = Math.max(0.35, Math.min(250, view.zoom * factor));
   const newScale = scale();
   view.x = wx - (mx - CX) / newScale;
   view.y = wy - (CY - my) / newScale;
@@ -289,6 +290,7 @@ document.getElementById("reset").onclick = async () => {
   await act("reset", {});
 };
 document.getElementById("view-reset").onclick = resetView;
+document.getElementById("view-system").onclick = focusSelection;
 document.getElementById("file").onchange = e => { if(e.target.files[0]) loadFile(e.target.files[0]); };
 window.addEventListener("dragover", e => e.preventDefault());
 window.addEventListener("drop", e => { e.preventDefault(); if(e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]); });
@@ -336,7 +338,9 @@ function focusSelection(){
   const target = loc || body || ship;
   if(!target) return;
   view.x = target.x; view.y = target.y;
-  view.zoom = Math.max(view.zoom, loc ? 4.5 : body && body.parent ? 4 : 2.2);
+  const focusZoom = loc ? 160 : body && body.id === "sun" ? 40 :
+    body && body.parent ? 120 : 100;
+  view.zoom = Math.max(view.zoom, focusZoom);
   updateViewChip(); draw();
 }
 cv.addEventListener("pointerdown", e => {
@@ -406,6 +410,42 @@ window.addEventListener("keydown", e => {
 
 function bodyById(id){ return SNAP.bodies.find(b => b.id === id); }
 
+function bodyDisplayRadius(body, drawScale){
+  if(body.id === "sun") return 14;
+  if(body.parent) return 4;
+  const childExtent = SNAP.bodies.filter(b => b.parent === body.id)
+    .reduce((m, b) => Math.max(m, b.a || 0), 0);
+  const locationExtent = (SNAP.locations || []).filter(l => l.body === body.id)
+    .reduce((m, l) => Math.max(m, l.orbit_a || 0), 0);
+  return Math.max(4, Math.min(110, Math.max(childExtent, locationExtent) * drawScale * 0.35));
+}
+function drawLocationMarkers(){
+  for(const loc of SNAP.locations || []){
+    const selected = sel.location === loc.id;
+    if(view.zoom < 1.15 && !selected) continue;
+    const X = px(loc.x), Y = py(loc.y);
+    const markerR = Math.max(3, Math.min(10,
+      (loc.kind === "station" ? 3.5 : loc.kind === "terminal" ? 3 : 2.2) * Math.sqrt(view.zoom)));
+    ctx.fillStyle = loc.kind === "station" ? STRAW : loc.kind === "terminal" ? ROYAL : "#cdbf85";
+    ctx.beginPath();
+    if(loc.kind === "station") ctx.rect(X - markerR, Y - markerR, markerR * 2, markerR * 2);
+    else if(loc.kind === "terminal"){
+      ctx.moveTo(X, Y - markerR - 1); ctx.lineTo(X + markerR + 1, Y + markerR);
+      ctx.lineTo(X - markerR - 1, Y + markerR); ctx.closePath();
+    } else ctx.arc(X, Y, markerR, 0, Math.PI * 2);
+    ctx.fill();
+    if(selected){
+      ctx.strokeStyle = STRAW; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(X, Y, markerR + 5, 0, Math.PI * 2); ctx.stroke();
+    }
+    if(view.zoom >= 3 || selected){
+      ctx.fillStyle = "rgba(237,231,200,.9)"; ctx.font = "10px sans-serif"; ctx.textAlign = "left";
+      ctx.fillText(loc.name, X + markerR + 4, Y + 3);
+    }
+    hitmap.push({kind:"location", id:loc.id, x:X, y:Y, r:Math.max(12, markerR + 6)});
+  }
+}
+
 function draw(){
   ctx.clearRect(0, 0, W, H);
   hitmap = [];
@@ -438,27 +478,9 @@ function draw(){
     ctx.setLineDash([2, 4]); ctx.lineWidth = 1;
     ctx.beginPath(); ctx.arc(parentX, parentY, loc.orbit_a * drawScale, 0, Math.PI * 2); ctx.stroke();
     ctx.setLineDash([]);
-    const X = px(loc.x), Y = py(loc.y);
-    const selected = sel.location === loc.id;
-    if(view.zoom < 1.15 && !selected) continue;
-    const markerR = loc.kind === "station" ? 3.5 : loc.kind === "terminal" ? 3 : 2.2;
-    ctx.fillStyle = loc.kind === "station" ? STRAW : loc.kind === "terminal" ? ROYAL : "#cdbf85";
-    ctx.beginPath();
-    if(loc.kind === "station") ctx.rect(X - markerR, Y - markerR, markerR * 2, markerR * 2);
-    else if(loc.kind === "terminal"){
-      ctx.moveTo(X, Y - markerR - 1); ctx.lineTo(X + markerR + 1, Y + markerR);
-      ctx.lineTo(X - markerR - 1, Y + markerR); ctx.closePath();
-    } else ctx.arc(X, Y, markerR, 0, Math.PI * 2);
-    ctx.fill();
-    if(selected){
-      ctx.strokeStyle = STRAW; ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.arc(X, Y, markerR + 5, 0, Math.PI * 2); ctx.stroke();
-    }
-    if(view.zoom >= 3 || selected){
-      ctx.fillStyle = "rgba(237,231,200,.9)"; ctx.font = "10px sans-serif"; ctx.textAlign = "left";
-      ctx.fillText(loc.name, X + markerR + 4, Y + 3);
-    }
-    hitmap.push({kind:"location", id:loc.id, x:X, y:Y, r:Math.max(10, markerR + 5)});
+    // Location markers are drawn after the parent bodies so surface points
+    // remain visible when the camera is inside a planet system.
+
   }
   for(const s of SNAP.ships){
     if(!s.leg || !s.arc_pts.length) continue;
@@ -477,10 +499,7 @@ function draw(){
   }
   for(const b of SNAP.bodies){
     const X = px(b.x), Y = py(b.y);
-    let r = 6;
-    if(b.id === "sun") r = 11;
-    else if(b.id === "fulmaior") r = 8;
-    else if(b.parent) r = 3.4;
+    const r = bodyDisplayRadius(b, drawScale);
     if(b.id === "sun"){
       const g = ctx.createRadialGradient(X, Y, 1, X, Y, 26);
       g.addColorStop(0, STRAW); g.addColorStop(1, "rgba(242,230,166,0)");
@@ -496,6 +515,7 @@ function draw(){
     ctx.fillText(b.id === "sun" ? "Sun" : b.id[0].toUpperCase() + b.id.slice(1), X + r + 4, Y + 4);
     hitmap.push({kind:"body", id:b.id, x:X, y:Y, r:Math.max(12, r + 6)});
   }
+  drawLocationMarkers();
   for(const s of SNAP.ships){
     const X = px(s.x), Y = py(s.y);
     ctx.fillStyle = ROYAL;
