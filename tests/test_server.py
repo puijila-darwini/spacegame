@@ -121,6 +121,10 @@ def test_save_slots_and_new_game():
     assert any(s["slot"] == "captain_slot" and s["captain"] == "Test Captain" for s in body["saves"])
     code, body = call("POST", "/api/load", {"slot": "test_slot"})
     assert code == 200 and body["ok"]
+    code, body = call("POST", "/api/delete-save", {"slot": "captain_slot"})
+    assert code == 200 and body["result"]["deleted"] == "captain_slot"
+    code, body = call("POST", "/api/delete-save", {"slot": "autosave"})
+    assert code == 400
 
 
 if __name__ == "__main__":

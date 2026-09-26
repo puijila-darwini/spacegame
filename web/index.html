@@ -393,6 +393,7 @@ let gesture = null;
 let ledgerFilter = "all", ledgerQuery = "", contractFilter = "all", contactQuery = "";
 let diagnostics = false, commandIndex = 0, toastSeq = 0;
 let REPORT_ITEMS = [];
+let ROUTE_COMPARISON = [];
 let pendingReport = false;
 let TRAILS = {};
 let frameCount = 0, fps = 0, lastFpsAt = performance.now();
@@ -701,9 +702,14 @@ async function showLoadSlots(){
     const j = await r.json();
     const saves = j.saves || [];
     document.getElementById("load-slots").innerHTML = saves.map(s =>
-      `<div class="title-slot"><span><b>${esc(s.label)}</b><br><small>${esc(s.captain)} · ${esc(s.difficulty)} · t=${Number(s.t).toFixed(1)}d</small></span><button class="title-btn" data-title-load="${esc(s.slot)}">LOAD</button></div>`).join("") ||
+      `<div class="title-slot"><span><b>${esc(s.label)}</b><br><small>${esc(s.captain)} · ${esc(s.difficulty)} · t=${Number(s.t).toFixed(1)}d</small></span><span><button class="title-btn" data-title-load="${esc(s.slot)}">LOAD</button>${s.slot !== "autosave" ? ` <button class="title-btn" data-title-delete="${esc(s.slot)}">DELETE</button>` : ""}</span></div>`).join("") ||
       "<div class='dim'>No named saves yet.</div>";
     document.querySelectorAll("[data-title-load]").forEach(b => b.onclick = () => loadCampaign(b.dataset.titleLoad));
+    document.querySelectorAll("[data-title-delete]").forEach(b => b.onclick = async () => {
+      if(!confirm(`Delete save slot ${b.dataset.titleDelete}?`)) return;
+      try { await titleRequest("delete-save", {slot:b.dataset.titleDelete}); showLoadSlots(); titleStatus("Save deleted."); }
+      catch(e){ titleStatus("Delete failed: " + e.message); }
+    });
   } catch(e){ titleStatus("Could not read saves: " + e.message); }
 }
 function initTitle(){
@@ -1227,6 +1233,29 @@ function settingsPanel(){
     <div class="ctl"><button class="hud-button" id="settings-save">Save campaign</button><button class="hud-button" id="settings-load">Load campaign</button></div>
     <div class="ctl"><button class="hud-button" id="settings-reset">Reset campaign</button><label class="hud-button" for="file">Load snapshot</label></div>`;
 }
+function routeComparisonHTML(){
+  if(!ROUTE_COMPARISON.length) return "";
+  return `<div class="tape" style="margin-top:10px">ROUTE COMPARISON</div><table class="book"><tr><th>world</th><th>wait</th><th>transit</th><th>total dv</th></tr>${ROUTE_COMPARISON.map(r => `<tr data-compare-dest="${esc(r.dest)}" style="cursor:pointer"><td>${esc(r.dest)}</td><td>${r.wait.toFixed(1)}d</td><td>${r.transit.toFixed(1)}d</td><td>${r.total.toFixed(3)}</td></tr>`).join("")}</table>`;
+}
+async function compareRoutes(){
+  const ship = SNAP.ships.find(x => x.id === sel.ship) || SNAP.ships[0];
+  if(!ship || ship.leg) return;
+  const destinations = SNAP.bodies.filter(b => b.id !== "sun" && b.id !== ship.at).map(b => b.id);
+  ROUTE_COMPARISON = [];
+  render();
+  const results = await Promise.all(destinations.map(async dest => {
+    try {
+      const r = await titleRequest("plot", {ship:ship.id, dest, dest_loc:null, arrive_by:null});
+      return {dest, wait:r.wait_d, transit:r.transit_d, total:r.total_dv};
+    } catch(e){ return null; }
+  }));
+  ROUTE_COMPARISON = results.filter(Boolean).sort((a, b) => (a.wait + a.transit) - (b.wait + b.transit));
+  render();
+  document.querySelectorAll("[data-compare-dest]").forEach(row => row.onclick = () => {
+    document.getElementById("c-dest").value = row.dataset.compareDest;
+    render();
+  });
+}
 function flightPanel(){
   const s = SNAP.ships.find(x => x.id === sel.ship) || SNAP.ships[0];
   if(!s) return "<span class='dim'>no ship</span>";
@@ -1236,13 +1265,17 @@ function flightPanel(){
     <div class="ctl"><label class="mini" for="c-dest">Destination world</label><select id="c-dest">${destOptions(s.at, sel.body)}</select>
       <label class="mini"><input type="checkbox" id="c-surf"> land on destination surface</label>
       <label class="mini" for="c-by">arrive by (optional)</label><input type="number" id="c-by" placeholder="t = …" style="width:110px"></div>
-    <div class="ctl"><button class="hud-button" id="c-prev">Preview route</button><button class="hud-button" id="c-go">Commit flight</button></div>
+    <div class="ctl"><button class="hud-button" id="c-prev">Preview route</button><button class="hud-button" id="c-go">Commit flight</button><button class="hud-button" id="compare-routes">Compare routes</button></div>
+    <div id="route-comparison">${routeComparisonHTML()}</div>
     ${PREVIEW ? `<div class="preview">${esc(PREVIEW)}</div>` : ""}`;
 }
 function reportPanel(){
   if(!REPORT_ITEMS.length) return "<span class='dim'>No new report.</span>";
+  const ship = SNAP.ships.find(x => x.id === sel.ship) || SNAP.ships[0];
+  const port = ship && ship.at ? SNAP.ports[ship.at] : null;
   return `<div class="tape">The sector moved while you were away.</div>${REPORT_ITEMS.map(e => `<div class="activity-row"><span>${esc((e.kind || "event").toUpperCase())}</span><span>${esc(e.msg)}</span></div>`).join("")}
-    <div class="ctl"><button class="hud-button" data-report-open="port">Open market</button><button class="hud-button" data-report-close="true">Continue</button></div>`;
+    ${ship && ship.at ? `<div class="preview">PC-1 is now at <b>${esc(ship.at)}</b>. ${port ? marketPulse(port) : ""}</div>` : ""}
+    <div class="ctl"><button class="hud-button" data-report-open="port">Open market</button><button class="hud-button" data-report-open="flight">Plan next flight</button><button class="hud-button" data-report-close="true">Continue</button></div>`;
 }
 function guidePanel(){
   const s = SNAP.ships.find(x => x.id === sel.ship) || SNAP.ships[0];
@@ -1459,11 +1492,18 @@ async function plotOrbit(ship, dest){
   render();
 }
 
+function marketQuote(portId, comm, side){
+  const book = SNAP.ports[portId] || {};
+  const rows = (side === "buy" ? book.asks : book.bids)?.[comm] || [];
+  if(!rows.length) return null;
+  return side === "buy" ? Math.min(...rows.map(r => r[0])) : Math.max(...rows.map(r => r[0]));
+}
 function wireLive(){
   if(!LIVE) return;
   const on = (id, fn) => { const el = document.getElementById(id); if(el) el.onclick = fn; };
   const ship = SNAP.ships.find(x => x.id === sel.ship) || SNAP.ships[0];
   on("flight-advance", nextEvent);
+  on("compare-routes", compareRoutes);
   on("c-prev", () => plotOrbit(ship, document.getElementById("c-dest").value));
   on("c-plan-target", () => {
     if(sel.body && sel.body !== "sun" && sel.body !== ship.at)
@@ -1483,12 +1523,18 @@ function wireLive(){
   });
   on("c-fuel", async () => { await act("refuel", {ship: ship.id}); });
   on("c-buy", async () => {
-    await act("buy", {ship: ship.id, comm: document.getElementById("c-comm").value,
-      qty: parseFloat(document.getElementById("c-qty").value) || 1});
+    const comm = document.getElementById("c-comm").value;
+    const qty = parseFloat(document.getElementById("c-qty").value) || 1;
+    const price = marketQuote(sel.port, comm, "buy");
+    if(!confirm(`Buy ${qty}t ${comm} at approximately ${price ?? "?"}cr/t?`)) return;
+    await act("buy", {ship: ship.id, comm, qty});
   });
   on("c-sell", async () => {
-    await act("sell", {ship: ship.id, comm: document.getElementById("c-comm").value,
-      qty: parseFloat(document.getElementById("c-qty").value) || 1});
+    const comm = document.getElementById("c-comm").value;
+    const qty = parseFloat(document.getElementById("c-qty").value) || 1;
+    const price = marketQuote(sel.port, comm, "sell");
+    if(!confirm(`Sell ${qty}t ${comm} at approximately ${price ?? "?"}cr/t?`)) return;
+    await act("sell", {ship: ship.id, comm, qty});
   });
   document.querySelectorAll("[data-accept]").forEach(b => b.onclick = () => act("accept", {cid: b.dataset.accept}));
   document.querySelectorAll("[data-fulfill]").forEach(b => b.onclick = () => act("fulfill", {ship: ship.id, cid: b.dataset.fulfill}));

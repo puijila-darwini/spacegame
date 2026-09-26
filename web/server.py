@@ -103,6 +103,15 @@ class Store:
         return self._save_meta(persist.to_dict(self.game), self._valid_slot(slot),
                                label or self._valid_slot(slot).replace("_", " ").title())
 
+    def delete_slot(self, slot: str) -> dict:
+        if self._valid_slot(slot) == "autosave":
+            raise ValueError("cannot delete autosave")
+        path = self._slot_path(slot)
+        if not os.path.exists(path):
+            raise ValueError("save slot not found")
+        os.remove(path)
+        return {"deleted": self._valid_slot(slot)}
+
     def load_slot(self, slot: str) -> dict:
         path = self._slot_path(slot)
         self.game = persist.load(path)
@@ -122,6 +131,8 @@ class Store:
                 return self.save_slot(p.get("slot", "quicksave"), p.get("label", ""))
             if name == "load":
                 return self.load_slot(p.get("slot", ""))
+            if name == "delete-save":
+                return self.delete_slot(p.get("slot", ""))
             if name == "new":
                 self.game = fresh_game(p.get("captain", "Commander"),
                                        p.get("difficulty", "balanced"),
