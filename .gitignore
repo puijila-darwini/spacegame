@@ -8,6 +8,7 @@ web/live.json
 tmp/
 sim/api.py.new
 run_tests.py
+web/server.log
 
 # Box-local agent configuration
 AGENTS.md

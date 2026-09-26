@@ -459,6 +459,7 @@ function pointDistance(a, b){ return Math.hypot(a.x - b.x, a.y - b.y); }
 function pointMid(a, b){ return {x:(a.x + b.x) / 2, y:(a.y + b.y) / 2}; }
 
 function esc(s){ return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function shipName(id){ return String(id || "").toUpperCase().replace(/^([A-Z]+)(\d+)$/, "$1-$2"); }
 function status(m){ document.getElementById("chip-status").textContent = m; }
 function toast(message){
   const stack = document.getElementById("toast-stack");
@@ -1203,6 +1204,16 @@ function openDrawer(section){
   render();
 }
 function closeDrawer(){ document.getElementById("detail-overlay").hidden = true; drawerSection = null; }
+function nextEventSummary(){
+  const now = SNAP.t;
+  const events = [];
+  for(const ship of SNAP.ships || []) if(ship.leg && ship.eta_d > 0) events.push({days:ship.eta_d, label:`${shipName(ship.id)} arrives`});
+  for(const c of SNAP.contracts || []) if(["open", "accepted"].includes(c.status) && c.deadline > now) events.push({days:c.deadline - now, label:`${c.id} deadline`});
+  events.sort((a, b) => a.days - b.days);
+  const next = events[0];
+  return next ? `<div class="rowline"><span class="tape">NEXT EVENT</span><span>${esc(next.label)} · ${next.days.toFixed(0)}d</span></div>` :
+    "<div class='tape'>NEXT EVENT · none scheduled</div>";
+}
 function hudPanel(){
   const s = SNAP.ships.find(x => x.id === sel.ship) || SNAP.ships[0];
   const where = s && s.leg ? `→ ${s.leg.to}` : s && s.at ? s.at : "unknown";
@@ -1213,6 +1224,7 @@ function hudPanel(){
   return `<div class="rowline"><span class="cname">${esc(campaign.name)}</span><span>${esc(campaign.captain)} · ${esc(campaign.difficulty)}</span></div>
     <div class="rowline"><span class="cname">PC-1 · ${esc(where)}</span><span>${cargo}t hold · ${s ? s.dv.toFixed(2) : "—"} dv</span></div>
     <div class="tape">CURRENT PORT · ${esc((sel.port || "—").toUpperCase())} · ${summary} markets</div>
+    ${nextEventSummary()}
     <div class="ctl"><button class="hud-button" data-open="port">Open market</button><button class="hud-button" data-open="flight">Plan flight</button><button class="hud-button" data-open="ship">Ship</button>
       <button class="hud-button" data-open="ledger">Log</button><button class="hud-button" data-open="ops">Watch</button>
       <button class="hud-button" data-open="contracts">Contracts</button><button class="hud-button" data-open="contacts">Contacts</button>
