@@ -1209,7 +1209,9 @@ function hudPanel(){
   const cargo = s ? Object.values(s.cargo || {}).reduce((a, b) => a + b, 0) : 0;
   const nextPort = SNAP.ports[sel.port];
   const summary = nextPort ? Object.keys(nextPort.asks || {}).length : 0;
-  return `<div class="rowline"><span class="cname">PC-1 · ${esc(where)}</span><span>${cargo}t hold · ${s ? s.dv.toFixed(2) : "—"} dv</span></div>
+  const campaign = SNAP.campaign || {captain:"Commander", difficulty:"balanced", name:"Sol Merchant"};
+  return `<div class="rowline"><span class="cname">${esc(campaign.name)}</span><span>${esc(campaign.captain)} · ${esc(campaign.difficulty)}</span></div>
+    <div class="rowline"><span class="cname">PC-1 · ${esc(where)}</span><span>${cargo}t hold · ${s ? s.dv.toFixed(2) : "—"} dv</span></div>
     <div class="tape">CURRENT PORT · ${esc((sel.port || "—").toUpperCase())} · ${summary} markets</div>
     <div class="ctl"><button class="hud-button" data-open="port">Open market</button><button class="hud-button" data-open="flight">Plan flight</button><button class="hud-button" data-open="ship">Ship</button>
       <button class="hud-button" data-open="ledger">Log</button><button class="hud-button" data-open="ops">Watch</button>
@@ -1370,7 +1372,10 @@ function marketSummary(port){
 }
 function marketScanner(){
   const rows = [];
+  const ship = SNAP.ships.find(x => x.id === sel.ship) || SNAP.ships[0];
+  const currentPort = ship && ship.at ? ship.at : sel.port;
   for(const [source, book] of Object.entries(SNAP.ports || {})){
+    if(currentPort && source !== currentPort) continue;
     for(const [comm, asks] of Object.entries(book.asks || {})){
       if(!asks.length) continue;
       const ask = Math.min(...asks.map(r => r[0]));
@@ -1385,7 +1390,7 @@ function marketScanner(){
   }
   rows.sort((a, b) => b.margin - a.margin);
   const top = rows.slice(0, 8);
-  return top.length ? `<table class="book"><tr><th>route</th><th>buy</th><th>sell</th><th>gross</th></tr>${top.map(r => `<tr data-opportunity-source="${esc(r.source)}" data-opportunity-comm="${esc(r.comm)}" style="cursor:pointer"><td>${esc(r.source)} → ${esc(r.dest)}</td><td>${r.ask}</td><td>${r.bid}</td><td>${r.margin.toFixed(1)}</td></tr>`).join("")}</table><div class="tape">Gross margin before fuel and time.</div>` : "<span class='dim'>No cross-port opportunities found.</span>";
+  return top.length ? `<table class="book"><tr><th>route</th><th>buy</th><th>sell</th><th>gross</th></tr>${top.map(r => `<tr data-opportunity-source="${esc(r.source)}" data-opportunity-dest="${esc(r.dest)}" data-opportunity-comm="${esc(r.comm)}" style="cursor:pointer"><td>${esc(r.source)} → ${esc(r.dest)}</td><td>${r.ask}</td><td>${r.bid}</td><td>${r.margin.toFixed(1)}</td></tr>`).join("")}</table><div class="tape">Gross margin before fuel and time. Click a route to plan it.</div>` : "<span class='dim'>No cross-port opportunities found.</span>";
 }
 function marketPulse(port){
   const rows = Object.keys(port.asks || {}).map(comm => {
@@ -1598,8 +1603,12 @@ function render(){
       sel.port = row.dataset.opportunitySource;
       sel.body = row.dataset.opportunitySource;
       render();
+      closeDrawer();
+      openDrawer("flight");
       const commodity = document.getElementById("c-comm");
       if(commodity) commodity.value = row.dataset.opportunityComm;
+      const destination = document.getElementById("c-dest");
+      if(destination) destination.value = row.dataset.opportunityDest;
     };
   });
   document.querySelectorAll("[data-report-open]").forEach(button => {

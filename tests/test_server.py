@@ -41,6 +41,7 @@ def test_snapshot_shape():
     code, body = call("GET", "/api/snapshot")
     assert code == 200
     assert body["v"] == 3 and len(body["bodies"]) == 11 and len(body["locations"]) == 18
+    assert body["campaign"]["captain"] == "Commander"
     assert len(body["contacts"]) == 14
 
 

@@ -114,7 +114,7 @@ def test_snapshot_v1():
     g = new_game()
     markets.buy(g, "pc1", "water", 5)
     s = api.snapshot(g)
-    assert s["v"] == 3 and set(s) == {"v", "t", "credits", "bodies", "ships", "ports", "ledger",
+    assert s["v"] == 3 and set(s) == {"v", "t", "credits", "campaign", "bodies", "ships", "ports", "ledger",
                                       "locations", "contacts", "known", "contracts"}
     assert len(s["ports"]) == 7
     assert s["ships"][0]["cargo"] == {"water": 5}

@@ -1,7 +1,7 @@
 """sim -> renderer contract v3: snapshot(t) the web canvas just draws.
 
 Shape:
-{v:3, t, credits, bodies:[{id,parent,kind,a,period,angle,x,y}],
+{v:3, t, credits, campaign:{captain,difficulty,name}, bodies:[{id,parent,kind,a,period,angle,x,y}],
  ships:[{id,at,loc,loc_to,leg,x,y,progress,eta_d,arc_pts,cargo,cargo_cap,dv,dv_cap}],
  ports:{port_id:{asks,bids,last}}, ledger:[...],
  locations:[{id,name,body,kind,depart_dv,arrive_dv,service,x,y,orbit_a,orbit_period,orbit_angle}],
@@ -165,6 +165,8 @@ def snapshot(game: Game) -> dict:
                           "orbit_a": orbit_a, "orbit_period": orbit_period,
                           "orbit_angle": round(orbit_angle, 6)})
     return {"v": SNAPSHOT_VERSION, "t": round(game.t, 2), "credits": round(game.credits, 2),
+            "campaign": {"captain": game.captain, "difficulty": game.difficulty,
+                         "name": game.campaign},
             "bodies": bodies, "ships": ships, "ports": ports, "ledger": ledger,
             "locations": locations,
             "contacts": contact_list, "known": {k: list(v) for k, v in game.known.items()},

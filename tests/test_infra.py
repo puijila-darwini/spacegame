@@ -38,7 +38,7 @@ def expect_raise(fn, exc=(ValueError, KeyError)):
     raise AssertionError(f"expected {exc}")
 
 
-V3_KEYS = {"v", "t", "credits", "bodies", "ships", "ports", "ledger",
+V3_KEYS = {"v", "t", "credits", "campaign", "bodies", "ships", "ports", "ledger",
            "locations", "contacts", "known", "contracts"}
 
 

@@ -170,7 +170,7 @@ def test_snapshot_v2():
     contracts.board(g, "arax")
     s = api.snapshot(g)
     assert s["v"] == 3
-    assert set(s) == {"v", "t", "credits", "bodies", "ships", "ports", "ledger",
+    assert set(s) == {"v", "t", "credits", "campaign", "bodies", "ships", "ports", "ledger",
                       "locations", "contacts", "known", "contracts"}
     assert len(s["contacts"]) == 14
     assert len(s["contracts"]) == 3

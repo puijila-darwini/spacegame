@@ -121,7 +121,7 @@ def test_snapshot_contract():
     leg = ships.commit(g, "pc1", "arax")
     time.advance_to(g, leg.t_depart + 1.0)  # mid-transit (ship waits out its window first)
     s = api.snapshot(g)
-    assert s["v"] == 3 and set(s) == {"v", "t", "credits", "bodies", "ships", "ports", "ledger",
+    assert s["v"] == 3 and set(s) == {"v", "t", "credits", "campaign", "bodies", "ships", "ports", "ledger",
                                       "locations", "contacts", "known", "contracts"}
     assert len(s["bodies"]) == 11
     ship = s["ships"][0]
