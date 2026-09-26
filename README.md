@@ -33,7 +33,7 @@ The system view is a camera-based canvas:
 
 At higher zoom, elevator terminals and stations appear as distinct markers orbiting their world. Surface locations remain valid destinations in the ship planner, but are intentionally not rendered as orbital objects. Selecting a station or terminal focuses the camera and preselects the matching local-transfer location in the ship panel. The local marker radii are renderer geometry for inspection; they do not change the Hohmann or delta-v simulation.
 
-The right-hand panels follow the current selection. The **Body / Frame** panel shows the selected body's orbital period, parent, moons, orbital sites, and active reference frame. A body selection can be used as the transfer destination without leaving the system view.
+The right-hand panels follow the current selection. The **Body / Frame** panel shows the selected body's orbital period, parent, moons, orbital sites, and active reference frame. The operator console also includes a command palette (`Ctrl/Cmd+K`), arrival/deadline timeline, port watchlist, world bookmarks, ledger/contract/contact filters, snapshot export, and a diagnostics overlay. A body selection can be used as the transfer destination without leaving the system view.
 
 ## Tests
 

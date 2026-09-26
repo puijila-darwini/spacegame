@@ -1,7 +1,7 @@
 """sim -> renderer contract v3: snapshot(t) the web canvas just draws.
 
 Shape:
-{v:3, t, credits, bodies:[{id,parent,a,period,angle,x,y}],
+{v:3, t, credits, bodies:[{id,parent,kind,a,period,angle,x,y}],
  ships:[{id,at,loc,loc_to,leg,x,y,progress,eta_d,arc_pts,cargo,cargo_cap,dv,dv_cap}],
  ports:{port_id:{asks,bids,last}}, ledger:[...],
  locations:[{id,name,body,kind,depart_dv,arrive_dv,service,x,y,orbit_a,orbit_period,orbit_angle}],
@@ -111,7 +111,7 @@ def snapshot(game: Game) -> dict:
         mu = orbits.MU_BY_PARENT.get(b.parent, orbits.MU_SUN) if b.parent else orbits.MU_SUN
         period = orbits.period(b.a, mu) if b.a > 0 else 0.0
         bodies.append({
-            "id": b.id, "parent": b.parent, "a": b.a, "period": period,
+            "id": b.id, "parent": b.parent, "kind": b.kind, "a": b.a, "period": period,
             "angle": round(th, 4), "x": round(x, 4), "y": round(y, 4),
         })
     ships = []

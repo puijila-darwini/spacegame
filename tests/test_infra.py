@@ -143,6 +143,7 @@ def test_snapshot_v3():
     assert s["v"] == 3 and set(s) == V3_KEYS
     assert len(s["locations"]) == 18
     assert len(s["bodies"]) == 11
+    assert all("kind" in body and "period" in body for body in s["bodies"])
     ship = s["ships"][0]
     assert ship["loc"] == "tide-surface" and ship["dv"] == ship["dv_cap"] == 0.25
     station = next(loc for loc in s["locations"] if loc["id"] == "tern-station")

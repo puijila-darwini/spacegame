@@ -246,6 +246,7 @@ let DRAW_SNAP = null, transition = null;
 let gesture = null;
 let ledgerFilter = "all", ledgerQuery = "", contractFilter = "all", contactQuery = "";
 let diagnostics = false, commandIndex = 0, toastSeq = 0;
+let TRAILS = {};
 let frameCount = 0, fps = 0, lastFpsAt = performance.now();
 const pointers = new Map();
 
@@ -398,6 +399,15 @@ function blendSnapshots(from, to, fraction){
   });
   return blended;
 }
+function recordTrails(next){
+  for(const ship of next.ships || []){
+    const trail = TRAILS[ship.id] || (TRAILS[ship.id] = []);
+    const last = trail[trail.length - 1];
+    if(!last || Math.hypot(last.x - ship.x, last.y - ship.y) > 1e-6)
+      trail.push({x:ship.x, y:ship.y, t:next.t});
+    if(trail.length > 80) trail.shift();
+  }
+}
 function setSnapshot(next, animate = true){
   const previous = DRAW_SNAP || SNAP;
   const oldTime = SNAP && Number.isFinite(SNAP.t) ? SNAP.t : null;
@@ -405,7 +415,9 @@ function setSnapshot(next, animate = true){
   const newLedger = next.ledger && next.ledger.length ? next.ledger[next.ledger.length - 1] : null;
   if(oldLedger && newLedger && (oldLedger.t !== newLedger.t || oldLedger.msg !== newLedger.msg))
     toast(`${String(newLedger.kind || "event").toUpperCase()}: ${newLedger.msg}`);
+  if(oldTime !== null && next.t < oldTime) TRAILS = {};
   SNAP = next;
+  recordTrails(next);
   if(animate && previous && oldTime !== null && next.t > oldTime){
     transition = {from:previous, to:next, start:performance.now(), duration:2400};
     DRAW_SNAP = previous;
@@ -800,6 +812,14 @@ function draw(){
 
   }
   for(const s of SNAP.ships){
+    const trail = TRAILS[s.id] || [];
+    if(trail.length < 2) continue;
+    ctx.strokeStyle = "rgba(157,124,250,.34)"; ctx.lineWidth = 1; ctx.setLineDash([]);
+    ctx.beginPath();
+    trail.forEach((point, i) => { const X = px(point.x), Y = py(point.y); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
+    ctx.stroke();
+  }
+  for(const s of SNAP.ships){
     if(!s.leg || !s.arc_pts.length) continue;
     ctx.strokeStyle = "rgba(242,230,166,.55)"; ctx.setLineDash([5, 4]); ctx.lineWidth = 1.4;
     ctx.beginPath();
@@ -943,6 +963,17 @@ function bookTable(side, lines){
   return `<table class="book">${h}</table>`;
 }
 
+function marketSummary(port){
+  const commodities = [...new Set([...Object.keys(port.asks || {}), ...Object.keys(port.bids || {})])].sort();
+  const rows = commodities.map(comm => {
+    const asks = (port.asks || {})[comm] || [], bids = (port.bids || {})[comm] || [];
+    const ask = asks.length ? Math.min(...asks.map(r => r[0])) : null;
+    const bid = bids.length ? Math.max(...bids.map(r => r[0])) : null;
+    const spread = ask !== null && bid !== null ? ask - bid : null;
+    return `<tr><td>${esc(comm)}</td><td class="ask">${ask ?? "—"}</td><td class="bid">${bid ?? "—"}</td><td>${spread === null ? "—" : spread.toFixed(1)}</td></tr>`;
+  });
+  return rows.length ? `<table class="book"><tr><th>market</th><th>ask</th><th>bid</th><th>spread</th></tr>${rows.join("")}</table>` : "<span class='dim'>no book</span>";
+}
 function portPanel(){
   const p = SNAP.ports[sel.port];
   if(!p) return "<span class='dim'>click a port world</span>";
@@ -957,19 +988,43 @@ function portPanel(){
       <button class="btn small" id="c-buy">Buy</button>
       <button class="btn small ghost" id="c-sell">Sell</button></div>`;
   }
-  h += `<div class="tape">ASKS</div>${bookTable("asks", p.asks)}
+  h += `<div class="tape">SPREAD</div>${marketSummary(p)}
+    <div class="tape">ASKS</div>${bookTable("asks", p.asks)}
     <div class="tape">BIDS</div>${bookTable("bids", p.bids)}
     <div class="tape">TAPE</div><div class="tape">${last}</div>`;
   return h;
 }
 
+function nextEvent(){
+  if(!LIVE){ status("Next-event jump requires the live server"); return; }
+  const now = SNAP.t;
+  const events = [];
+  for(const ship of SNAP.ships || []){
+    if(ship.leg && ship.eta_d > 0) events.push({days:ship.eta_d, label:`${ship.id.toUpperCase()} arrives at ${ship.leg.to}`});
+  }
+  for(const contract of SNAP.contracts || []){
+    if(["open", "accepted"].includes(contract.status) && contract.deadline > now)
+      events.push({days:contract.deadline - now, label:`${contract.id} deadline`});
+  }
+  if(!events.length){ toast("No upcoming arrival or contract deadline"); return; }
+  events.sort((a, b) => a.days - b.days);
+  const next = events[0];
+  toast(`Advancing ${Math.ceil(next.days)}d · ${next.label}`);
+  return act("advance", {days:Math.min(3650, Math.max(1, Math.ceil(next.days)))});
+}
 function opsPanel(){
   const arrivals = SNAP.ships.filter(s => s.leg).sort((a, b) => a.eta_d - b.eta_d);
+  const deadlines = (SNAP.contracts || []).filter(c => ["open", "accepted"].includes(c.status))
+    .sort((a, b) => a.deadline - b.deadline).slice(0, 4);
   const watched = [...WATCHLIST].filter(id => SNAP.ports[id]);
-  let h = `<div class="tape">UPCOMING ARRIVALS</div>`;
+  let h = `<div class="ctl"><button class="btn tiny" id="next-event">Advance to next event</button></div><div class="tape">UPCOMING ARRIVALS</div>`;
   h += arrivals.length ? arrivals.map(s =>
     `<div class="ops-row"><span>${esc(s.id.toUpperCase())} → ${esc(s.leg.to)}</span><span>${s.eta_d.toFixed(1)}d</span></div>`).join("") :
     "<div class='dim' style='padding:3px 0'>no ships in transit</div>";
+  h += `<div class="tape" style="margin-top:8px">DEADLINES</div>`;
+  h += deadlines.length ? deadlines.map(c =>
+    `<div class="ops-row"><span>${esc(c.id)} · ${esc(c.status)}</span><span>${Math.max(0, c.deadline - SNAP.t).toFixed(0)}d</span></div>`).join("") :
+    "<div class='dim' style='padding:3px 0'>no open deadlines</div>";
   h += `<div class="tape" style="margin-top:8px">WATCHED PORTS</div>`;
   h += watched.length ? watched.map(id =>
     `<div class="ops-row"><button class="btn tiny ghost" data-jump-port="${esc(id)}">${esc(id.toUpperCase())}</button><span>open book</span></div>`).join("") :
@@ -1095,6 +1150,8 @@ function render(){
   if(bodyBookmark) bodyBookmark.onclick = () => toggleStored(BOOKMARKS, sel.body, "bookmarks");
   const portWatch = document.getElementById("port-watch");
   if(portWatch) portWatch.onclick = () => toggleStored(WATCHLIST, sel.port, "watchlist");
+  const nextEventButton = document.getElementById("next-event");
+  if(nextEventButton) nextEventButton.onclick = nextEvent;
   document.querySelectorAll("[data-jump-port]").forEach(button => {
     button.onclick = () => { sel.port = button.dataset.jumpPort; sel.body = button.dataset.jumpPort; render(); };
   });
