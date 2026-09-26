@@ -176,6 +176,20 @@
   body.elite .filterbar{border-bottom:1px solid rgba(57,214,232,.2); padding-bottom:6px}
   body.elite .ops-row{border-bottom-color:rgba(57,214,232,.14)}
   body.elite .foot{color:var(--royal); letter-spacing:1px}
+  .drawer-overlay{position:fixed; inset:0; z-index:18; background:rgba(2,7,11,.72); display:flex; justify-content:flex-end}
+  .drawer{width:min(560px,94vw); height:100%; overflow:auto; background:var(--phthalo2); border-left:1px solid var(--straw-dim); box-shadow:-12px 0 40px #000b; padding:14px}
+  .drawer-head{display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--straw-dim); padding-bottom:10px; margin-bottom:10px; color:var(--straw); font-weight:700; letter-spacing:2px}
+  .drawer .card{margin-bottom:12px}
+  .drawer-section{display:block}
+  .drawer-section[hidden]{display:none !important}
+  .hud-button{border:1px solid var(--straw-dim); padding:5px 8px; margin:3px; background:transparent; color:var(--straw); font:11px ui-monospace,monospace; cursor:pointer}
+  .hud-button:hover{background:var(--straw); color:var(--phthalo)}
+  .activity-row{display:flex; justify-content:space-between; gap:8px; padding:4px 0; border-bottom:1px dashed var(--straw-faint); font-size:12px}
+  body.elite .drawer-overlay{background:rgba(1,5,8,.8)}
+  body.elite .drawer{background:#031017; border-left-color:var(--royal)}
+  body.elite .drawer-head{color:var(--royal); border-color:var(--royal)}
+  body.elite .hud-button{border-radius:0; color:var(--royal); border-color:var(--royal); background:transparent}
+  body.elite .hud-button:hover{background:var(--royal); color:#001015}
 </style>
 </head>
 <body>
@@ -194,7 +208,7 @@
   <button class="btn ghost" id="help">Help</button>
   <button class="btn ghost" id="theme-toggle">Theme: Elite</button>
   <button class="btn ghost" id="reload">Reload data</button>
-  <label class="btn ghost" for="file">Load snapshot file…</label>
+  <label class="btn ghost" id="file-toolbar-label" for="file">Load snapshot file…</label>
   <input type="file" id="file" accept=".json,application/json">
   <button class="btn ghost" id="reset">Reset game</button>
   <button class="btn ghost" id="view-system">Fit system</button>
@@ -218,17 +232,12 @@
     <div class="card">
       <span class="pill">SYSTEM VIEW</span>
       <div class="body"><canvas id="sys" width="860" height="680"></canvas>
-        <div class="canvas-help">Drag to pan · wheel or pinch to zoom · click a world or ship · double-click a world for system view</div>
+        <div class="canvas-help">Drag to pan · wheel or pinch to zoom · click a world or ship · double-click a world to fit its system</div>
       </div>
     </div>
     <div class="card">
-      <span class="pill">LEDGER</span>
-      <div class="filterbar"><select id="ledger-filter" aria-label="Ledger filter">
-        <option value="all">All events</option><option value="arrival">Arrivals</option>
-        <option value="event">Events</option><option value="contract">Contracts</option>
-        <option value="service">Services</option><option value="contact">Contacts</option>
-      </select><input id="ledger-search" type="search" placeholder="filter ledger…"></div>
-      <div class="body ledger" id="p-ledger"></div>
+      <span class="pill">ACTIVITY</span>
+      <div class="body" id="p-activity"></div>
     </div>
   </div>
   <div>
@@ -237,37 +246,40 @@
       <div class="body" id="p-guide"></div>
     </div>
     <div class="card">
-      <span class="pill">BODY / FRAME</span>
-      <div class="body" id="p-body"></div>
-    </div>
-    <div class="card">
-      <span class="pill">SHIP</span>
-      <div class="body" id="p-ship"></div>
-    </div>
-    <div class="card">
-      <span class="pill">PORT</span>
-      <div class="body" id="p-port"></div>
-    </div>
-    <div class="card">
-      <span class="pill">WATCH / ARRIVALS</span>
-      <div class="body" id="p-ops"></div>
-    </div>
-    <div class="card">
-      <span class="pill">CONTRACTS</span>
-      <div class="filterbar"><select id="contract-filter" aria-label="Contract filter">
-        <option value="all">All contracts</option><option value="open">Open</option>
-        <option value="accepted">Accepted</option><option value="filled">Filled</option>
-        <option value="lapsed">Lapsed</option>
-      </select></div>
-      <div class="body" id="p-contracts"></div>
-    </div>
-    <div class="card">
-      <span class="pill">CONTACTS</span>
-      <div class="filterbar"><input id="contact-search" type="search" placeholder="find name, port, occupation…"></div>
-      <div class="body" id="p-contacts"></div>
+      <span class="pill">COMMAND DECK</span>
+      <div class="body" id="p-hud"></div>
     </div>
   </div>
 </main>
+<div class="drawer-overlay" id="detail-overlay" hidden>
+  <div class="drawer">
+    <div class="drawer-head"><span id="drawer-title">COMMAND DETAILS</span><button class="btn small ghost" id="drawer-close">Close</button></div>
+    <div id="section-ledger" class="drawer-section" hidden>
+      <div class="card"><span class="pill">LEDGER</span><div class="filterbar"><select id="ledger-filter" aria-label="Ledger filter"><option value="all">All events</option><option value="arrival">Arrivals</option><option value="event">Events</option><option value="contract">Contracts</option><option value="service">Services</option><option value="contact">Contacts</option></select><input id="ledger-search" type="search" placeholder="filter ledger…"></div><div class="body ledger" id="p-ledger"></div></div>
+    </div>
+    <div id="section-body" class="drawer-section" hidden>
+      <div class="card"><span class="pill">BODY / FRAME</span><div class="body" id="p-body"></div></div>
+    </div>
+    <div id="section-ship" class="drawer-section" hidden>
+      <div class="card"><span class="pill">SHIP</span><div class="body" id="p-ship"></div></div>
+    </div>
+    <div id="section-port" class="drawer-section" hidden>
+      <div class="card"><span class="pill">MARKET</span><div class="body" id="p-port"></div></div>
+    </div>
+    <div id="section-ops" class="drawer-section" hidden>
+      <div class="card"><span class="pill">WATCH / ARRIVALS</span><div class="body" id="p-ops"></div></div>
+    </div>
+    <div id="section-contracts" class="drawer-section" hidden>
+      <div class="card"><span class="pill">CONTRACTS</span><div class="filterbar"><select id="contract-filter" aria-label="Contract filter"><option value="all">All contracts</option><option value="open">Open</option><option value="accepted">Accepted</option><option value="filled">Filled</option><option value="lapsed">Lapsed</option></select></div><div class="body" id="p-contracts"></div></div>
+    </div>
+    <div id="section-contacts" class="drawer-section" hidden>
+      <div class="card"><span class="pill">CONTACTS</span><div class="filterbar"><input id="contact-search" type="search" placeholder="find name, port, occupation…"></div><div class="body" id="p-contacts"></div></div>
+    </div>
+    <div id="section-settings" class="drawer-section" hidden>
+      <div class="card"><span class="pill">SETTINGS</span><div class="body" id="p-settings"></div></div>
+    </div>
+  </div>
+</div>
 <div class="palette-overlay" id="command-overlay" hidden>
   <div class="palette-box"><input id="command-input" type="search" autocomplete="off" placeholder="Type a command…">
     <div class="palette-list" id="command-list"></div>
@@ -486,6 +498,16 @@ function recordTrails(next){
     if(trail.length > 80) trail.shift();
   }
 }
+function syncSelectionToShip(){
+  const ship = SNAP && SNAP.ships ? SNAP.ships.find(s => s.id === sel.ship) || SNAP.ships[0] : null;
+  if(!ship) return;
+  sel.ship = ship.id;
+  if(!ship.leg && ship.at){
+    sel.body = ship.at;
+    sel.location = ship.loc || null;
+    if(SNAP.ports && SNAP.ports[ship.at]) sel.port = ship.at;
+  }
+}
 function setSnapshot(next, animate = true){
   const previous = DRAW_SNAP || SNAP;
   const oldTime = SNAP && Number.isFinite(SNAP.t) ? SNAP.t : null;
@@ -594,7 +616,8 @@ async function boot(fromPoll){
     const r = await fetch("/api/snapshot", {cache:"no-store"});
     if(r.ok){
       setSnapshot(await r.json(), false);
-      if(!LIVE){ LIVE = true; setLiveUI(); poll(); }
+      if(!fromPoll) syncSelectionToShip();
+      if(!LIVE){ LIVE = true; setLiveUI(); applyGameChrome(); poll(); }
       if(!fromPoll) status("live");
       render();
       return;
@@ -603,10 +626,17 @@ async function boot(fromPoll){
   if(!SNAP && !fromPoll){
     try{
       const r = await fetch("snapshot.json", {cache:"no-store"});
-      if(r.ok){ setSnapshot(await r.json(), false); status("snapshot.json"); }
+      if(r.ok){ setSnapshot(await r.json(), false); syncSelectionToShip(); status("snapshot.json"); }
     }catch(e){ /* file mode via loader */ }
     render();
   }
+}
+function applyGameChrome(){
+  for(const id of ["export", "diagnostics", "help", "theme-toggle", "reload", "reset", "view-system", "view-reset", "frame-mode", "body-jump"]){
+    const el = document.getElementById(id); if(el) el.hidden = true;
+  }
+  document.getElementById("file-toolbar-label").hidden = true;
+  document.querySelectorAll('label[for="frame-mode"],label[for="body-jump"]').forEach(el => { el.hidden = true; });
 }
 function setLiveUI(){
   document.getElementById("chip-mode").textContent = "● LIVE";
@@ -644,6 +674,8 @@ document.getElementById("command-input").onkeydown = e => {
   else if(e.key === "ArrowUp"){ e.preventDefault(); commandIndex = Math.max(0, commandIndex - 1); renderCommands(); }
 };
 document.getElementById("command-overlay").onclick = e => { if(e.target.id === "command-overlay") closePalette(); };
+document.getElementById("detail-overlay").onclick = e => { if(e.target.id === "detail-overlay") closeDrawer(); };
+document.getElementById("drawer-close").onclick = closeDrawer;
 document.getElementById("ledger-filter").onchange = e => { ledgerFilter = e.target.value; render(); };
 document.getElementById("ledger-search").oninput = e => { ledgerQuery = e.target.value; render(); };
 document.getElementById("contract-filter").onchange = e => { contractFilter = e.target.value; render(); };
@@ -672,6 +704,7 @@ function loadFile(f){
     document.getElementById("chip-mode").classList.remove("live");
     for(const id of ["adv1", "adv7", "adv30", "adv90", "auto"]) document.getElementById(id).hidden = true;
     setSnapshot(JSON.parse(rd.result), false);
+    syncSelectionToShip();
     status(f.name);
     render();
   };
@@ -806,7 +839,7 @@ cv.addEventListener("dblclick", e => {
 });
 window.addEventListener("keydown", e => {
   if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k"){ e.preventDefault(); openPalette(); return; }
-  if(e.key === "Escape"){ closePalette(); return; }
+  if(e.key === "Escape"){ closePalette(); closeDrawer(); return; }
   if(["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
   if(e.key === "/"){ e.preventDefault(); openPalette(); }
   else if(e.key === "0") resetView();
@@ -996,6 +1029,44 @@ function toggleStored(set, id, storageName){
   else { set.add(id); toast(`${id} added to ${storageName}`); }
   saveLocalSet(storageName, set);
   render();
+}
+const DRAWER_TITLES = {ledger:"LEDGER", body:"BODY / FRAME", ship:"SHIP", port:"MARKET", ops:"WATCH / ARRIVALS", contracts:"CONTRACTS", contacts:"CONTACTS", settings:"SETTINGS"};
+let drawerSection = null;
+function openDrawer(section){
+  drawerSection = section;
+  document.getElementById("detail-overlay").hidden = false;
+  document.getElementById("drawer-title").textContent = DRAWER_TITLES[section] || "COMMAND DETAILS";
+  document.querySelectorAll(".drawer-section").forEach(el => { el.hidden = el.id !== `section-${section}`; });
+  render();
+}
+function closeDrawer(){ document.getElementById("detail-overlay").hidden = true; drawerSection = null; }
+function hudPanel(){
+  const s = SNAP.ships.find(x => x.id === sel.ship) || SNAP.ships[0];
+  const where = s && s.leg ? `→ ${s.leg.to}` : s && s.at ? s.at : "unknown";
+  const cargo = s ? Object.values(s.cargo || {}).reduce((a, b) => a + b, 0) : 0;
+  const nextPort = SNAP.ports[sel.port];
+  const summary = nextPort ? Object.keys(nextPort.asks || {}).length : 0;
+  return `<div class="rowline"><span class="cname">PC-1 · ${esc(where)}</span><span>${cargo}t hold · ${s ? s.dv.toFixed(2) : "—"} dv</span></div>
+    <div class="tape">CURRENT PORT · ${esc((sel.port || "—").toUpperCase())} · ${summary} markets</div>
+    <div class="ctl"><button class="hud-button" data-open="port">Open market</button><button class="hud-button" data-open="ship">Ship</button>
+      <button class="hud-button" data-open="ledger">Log</button><button class="hud-button" data-open="ops">Watch</button>
+      <button class="hud-button" data-open="settings">Settings</button><button class="hud-button" id="hud-help">Help</button></div>`;
+}
+function activityPanel(){
+  const tape = Object.entries(SNAP.ports || {}).flatMap(([port, book]) => Object.entries((book && book.last) || {})
+    .filter(([, trade]) => trade).map(([comm, trade]) => ({t:trade.t, kind:"trade",
+      msg:`${port} ${trade.side} ${trade.qty}t ${comm} @ ${trade.price}`})));
+  const items = [...(SNAP.ledger || []), ...tape].sort((a, b) => (a.t || 0) - (b.t || 0)).slice(-5).reverse();
+  if(!items.length) return "<span class='dim'>The sector is quiet. Your next move is yours.</span>";
+  return items.map(e => `<div class="activity-row"><span>${esc((e.kind || "event").toUpperCase())}</span><span>${esc(e.msg)}</span></div>`).join("");
+}
+function settingsPanel(){
+  return `<div class="tape">ADVANCED CONTROLS</div>
+    <div class="ctl"><button class="hud-button" id="settings-theme">Theme: ${themeName === "elite" ? "Elite" : "Greenhouse"}</button>
+      <button class="hud-button" id="settings-diagnostics">Diagnostics</button><button class="hud-button" id="settings-export">Export snapshot</button></div>
+    <div class="rowline"><span>Reference frame</span><select id="settings-frame"><option value="inertial">Heliocentric</option><option value="follow">Follow selected world</option></select></div>
+    <div class="rowline"><span>Jump to world</span><select id="settings-jump">${bodyOptions(sel.body)}</select></div>
+    <div class="ctl"><button class="hud-button" id="settings-reset">Reset campaign</button><label class="hud-button" for="file">Load snapshot</label></div>`;
 }
 function guidePanel(){
   const s = SNAP.ships.find(x => x.id === sel.ship) || SNAP.ships[0];
@@ -1259,6 +1330,9 @@ function render(){
   bodyJump.innerHTML = bodyOptions(sel.body);
   bodyJump.value = sel.body;
   document.getElementById("p-guide").innerHTML = guidePanel();
+  document.getElementById("p-hud").innerHTML = hudPanel();
+  document.getElementById("p-activity").innerHTML = activityPanel();
+  document.getElementById("p-settings").innerHTML = settingsPanel();
   document.getElementById("p-body").innerHTML = bodyPanel();
   document.getElementById("p-ship").innerHTML = shipPanel();
   document.getElementById("p-port").innerHTML = portPanel();
@@ -1269,6 +1343,23 @@ function render(){
   wireLive();
   const bodyFocus = document.getElementById("body-focus");
   if(bodyFocus) bodyFocus.onclick = enterSystemView;
+  document.querySelectorAll("[data-open]").forEach(button => {
+    button.onclick = () => openDrawer(button.dataset.open);
+  });
+  const hudHelp = document.getElementById("hud-help");
+  if(hudHelp) hudHelp.onclick = openPalette;
+  const settingsTheme = document.getElementById("settings-theme");
+  if(settingsTheme) settingsTheme.onclick = () => applyTheme(themeName === "elite" ? "greenhouse" : "elite");
+  const settingsDiag = document.getElementById("settings-diagnostics");
+  if(settingsDiag) settingsDiag.onclick = toggleDiagnostics;
+  const settingsExport = document.getElementById("settings-export");
+  if(settingsExport) settingsExport.onclick = downloadSnapshot;
+  const settingsFrame = document.getElementById("settings-frame");
+  if(settingsFrame){ settingsFrame.value = frameMode; settingsFrame.onchange = e => setFrameMode(e.target.value); }
+  const settingsJump = document.getElementById("settings-jump");
+  if(settingsJump) settingsJump.onchange = e => { if(e.target.value){ selectHit({kind:"body", id:e.target.value}); closeDrawer(); enterSystemView(); } };
+  const settingsReset = document.getElementById("settings-reset");
+  if(settingsReset) settingsReset.onclick = () => { if(confirm("Reset the live game? This replaces the current campaign save.")){ closeDrawer(); act("reset", {}); } };
   const guideAction = document.getElementById("guide-action");
   if(guideAction) guideAction.onclick = () => {
     const ship = SNAP.ships.find(x => x.id === sel.ship) || SNAP.ships[0];
