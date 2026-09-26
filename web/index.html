@@ -487,6 +487,13 @@ function setSnapshot(next, animate = true){
   const oldTime = SNAP && Number.isFinite(SNAP.t) ? SNAP.t : null;
   const oldLedger = SNAP && SNAP.ledger && SNAP.ledger.length ? SNAP.ledger[SNAP.ledger.length - 1] : null;
   const newLedger = next.ledger && next.ledger.length ? next.ledger[next.ledger.length - 1] : null;
+  const oldShip = SNAP && SNAP.ships ? SNAP.ships.find(s => s.id === sel.ship) : null;
+  const newShip = next.ships ? next.ships.find(s => s.id === sel.ship) : null;
+  if(oldShip && oldShip.leg && newShip && !newShip.leg && newShip.at && sel.ship === newShip.id){
+    sel.body = newShip.at;
+    sel.location = newShip.loc || null;
+    if(next.ports && next.ports[newShip.at]) sel.port = newShip.at;
+  }
   if(oldLedger && newLedger && (oldLedger.t !== newLedger.t || oldLedger.msg !== newLedger.msg))
     toast(`${String(newLedger.kind || "event").toUpperCase()}: ${newLedger.msg}`);
   if(oldTime !== null && next.t < oldTime) TRAILS = {};
