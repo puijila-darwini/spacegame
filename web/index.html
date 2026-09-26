@@ -191,14 +191,14 @@
   <button class="btn ghost" id="auto" hidden>Auto 1d/min</button>
   <button class="btn ghost" id="export">Export</button>
   <button class="btn ghost" id="diagnostics">Diagnostics</button>
-  <button class="btn ghost" id="help">?</button>
+  <button class="btn ghost" id="help">Help</button>
   <button class="btn ghost" id="theme-toggle">Theme: Elite</button>
-  <button class="btn ghost" id="reload">Reload snapshot.json</button>
+  <button class="btn ghost" id="reload">Reload data</button>
   <label class="btn ghost" for="file">Load snapshot file…</label>
   <input type="file" id="file" accept=".json,application/json">
   <button class="btn ghost" id="reset">Reset game</button>
-  <button class="btn ghost" id="view-system">System view</button>
-  <button class="btn ghost" id="view-reset">Reset view</button>
+  <button class="btn ghost" id="view-system">Fit system</button>
+  <button class="btn ghost" id="view-reset">Reset camera</button>
   <label class="mini" for="frame-mode">frame</label>
   <select id="frame-mode" aria-label="Reference frame">
     <option value="inertial">Heliocentric inertial</option>
@@ -232,6 +232,10 @@
     </div>
   </div>
   <div>
+    <div class="card">
+      <span class="pill">START HERE</span>
+      <div class="body" id="p-guide"></div>
+    </div>
     <div class="card">
       <span class="pill">BODY / FRAME</span>
       <div class="body" id="p-body"></div>
@@ -993,6 +997,24 @@ function toggleStored(set, id, storageName){
   saveLocalSet(storageName, set);
   render();
 }
+function guidePanel(){
+  const s = SNAP.ships.find(x => x.id === sel.ship) || SNAP.ships[0];
+  if(!s) return "<span class='dim'>no ship</span>";
+  const cargo = Object.keys(s.cargo || {}).length;
+  if(s.leg){
+    return `<div class="rowline"><span class="cname">STEP 3 · IN TRANSIT</span><span class="badge royal">${s.eta_d.toFixed(0)}d</span></div>
+      <div class="tape">PC-1 is travelling to ${esc(s.leg.to)}. Nothing needs your attention until it arrives.</div>
+      <div class="ctl"><button class="btn small" id="guide-action">Advance to arrival</button></div>`;
+  }
+  if(cargo){
+    return `<div class="rowline"><span class="cname">STEP 2 · CHOOSE A ROUTE</span><span class="tape">${cargo} commodity type${cargo === 1 ? "" : "s"} aboard</span></div>
+      <div class="tape">Pick a destination, preview the time and fuel cost, then commit the flight.</div>
+      <div class="ctl"><button class="btn small" id="guide-action">Preview a route</button></div>`;
+  }
+  return `<div class="rowline"><span class="cname">STEP 1 · BUY SOMETHING</span><span class="tape">${esc(SNAP.ports[sel.port] ? sel.port : "no port")}</span></div>
+    <div class="tape">Start in the PORT panel: choose a commodity and tonnes, then buy it.</div>
+    <div class="ctl"><button class="btn small" id="guide-action">Go to market</button></div>`;
+}
 function bodyPanel(){
   const body = bodyById(sel.body);
   if(!body) return "<span class='dim'>click a world to inspect it</span>";
@@ -1034,15 +1056,16 @@ function shipPanel(){
     <div class="rowline"><span>tank</span><span>${s.dv} <span class="dim">/ ${s.dv_cap} dv</span></span></div>`;
   if(LIVE && !s.leg){
     const targetHint = target ? `<div class="rowline"><span class="tape">selected destination</span><span><b>${esc(target.id[0].toUpperCase() + target.id.slice(1))}</b> <button class="btn small ghost" id="c-plan-target">Plan selected orbit</button></span></div>` : "";
-    h += targetHint + `<div class="ctl"><select id="c-dest">${destOptions(s.at, sel.body)}</select>
-      <label class="mini"><input type="checkbox" id="c-surf"> surface</label>
-      <input type="number" id="c-by" placeholder="arrive by t=" style="width:110px">
-      <button class="btn small ghost" id="c-prev">Preview</button>
-      <button class="btn small" id="c-go">Commit</button></div>
+    h += targetHint + `<div class="ctl"><label class="mini" for="c-dest">Destination world</label><select id="c-dest">${destOptions(s.at, sel.body)}</select>
+      <label class="mini"><input type="checkbox" id="c-surf"> land on destination surface</label>
+      <label class="mini" for="c-by">arrive by (optional)</label>
+      <input type="number" id="c-by" placeholder="t = …" style="width:110px">
+      <button class="btn small ghost" id="c-prev">Preview route</button>
+      <button class="btn small" id="c-go">Commit flight</button></div>
       ${selectedLocation ? `<div class="rowline"><span class="tape">selected local location</span><span><b>${esc(selectedLocation.name)}</b> · ${esc(selectedLocation.kind)}</span></div>` : ""}
-      <div class="ctl"><select id="c-loc">${locOptions(s.at, sel.location)}</select>
-      <button class="btn small ghost" id="c-transfer">Move here</button>
-      <button class="btn small ghost" id="c-fuel">Refuel</button></div>
+      <div class="ctl"><label class="mini" for="c-loc">Local site</label><select id="c-loc">${locOptions(s.at, sel.location)}</select>
+      <button class="btn small ghost" id="c-transfer">Move ship here</button>
+      <button class="btn small ghost" id="c-fuel">Refuel here</button></div>
       ${PREVIEW ? `<div class="preview">${esc(PREVIEW)}</div>` : ""}`;
   }
   return h;
@@ -1081,10 +1104,10 @@ function portPanel(){
     <div class="ctl"><button class="btn tiny ghost" id="port-watch">${WATCHLIST.has(sel.port) ? "Unwatch port" : "Watch port"}</button></div>`;
   if(LIVE){
     const comms = Object.keys(p.asks).map(c => `<option>${c}</option>`).join("");
-    h += `<div class="ctl"><select id="c-comm">${comms}</select>
-      <input type="number" id="c-qty" value="5" style="width:70px">
-      <button class="btn small" id="c-buy">Buy</button>
-      <button class="btn small ghost" id="c-sell">Sell</button></div>`;
+    h += `<div class="ctl"><label class="mini" for="c-comm">Commodity</label><select id="c-comm">${comms}</select>
+      <label class="mini" for="c-qty">Tonnes</label><input type="number" id="c-qty" value="5" min="1" style="width:70px">
+      <button class="btn small" id="c-buy">Buy commodity</button>
+      <button class="btn small ghost" id="c-sell">Sell cargo</button></div>`;
   }
   h += `<div class="tape">SPREAD</div>${marketSummary(p)}
     <div class="tape">ASKS</div>${bookTable("asks", p.asks)}
@@ -1198,6 +1221,7 @@ function wireLive(){
   on("c-go", async () => {
     const dest = document.getElementById("c-dest").value;
     const by = parseFloat(document.getElementById("c-by").value);
+    if(!confirm(`Commit flight to ${dest}? This spends delta-v and starts the voyage.`)) return;
     PREVIEW = "";
     await act("commit", {ship: ship.id, dest,
       dest_loc: document.getElementById("c-surf").checked ? dest + "-surface" : null,
@@ -1234,6 +1258,7 @@ function render(){
   const bodyJump = document.getElementById("body-jump");
   bodyJump.innerHTML = bodyOptions(sel.body);
   bodyJump.value = sel.body;
+  document.getElementById("p-guide").innerHTML = guidePanel();
   document.getElementById("p-body").innerHTML = bodyPanel();
   document.getElementById("p-ship").innerHTML = shipPanel();
   document.getElementById("p-port").innerHTML = portPanel();
@@ -1244,6 +1269,20 @@ function render(){
   wireLive();
   const bodyFocus = document.getElementById("body-focus");
   if(bodyFocus) bodyFocus.onclick = enterSystemView;
+  const guideAction = document.getElementById("guide-action");
+  if(guideAction) guideAction.onclick = () => {
+    const ship = SNAP.ships.find(x => x.id === sel.ship) || SNAP.ships[0];
+    if(!ship) return;
+    if(ship.leg){ nextEvent(); return; }
+    if(Object.keys(ship.cargo || {}).length){
+      const dest = document.getElementById("c-dest");
+      if(dest) plotOrbit(ship, dest.value);
+    } else {
+      if(SNAP.ports[ship.at]) sel.port = ship.at;
+      render();
+      document.getElementById("p-port")?.scrollIntoView({behavior:"smooth", block:"nearest"});
+    }
+  };
   const bodyBookmark = document.getElementById("body-bookmark");
   if(bodyBookmark) bodyBookmark.onclick = () => toggleStored(BOOKMARKS, sel.body, "bookmarks");
   const portWatch = document.getElementById("port-watch");
