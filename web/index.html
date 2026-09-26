@@ -190,6 +190,10 @@
   body.elite .drawer-head{color:var(--royal); border-color:var(--royal)}
   body.elite .hud-button{border-radius:0; color:var(--royal); border-color:var(--royal); background:transparent}
   body.elite .hud-button:hover{background:var(--royal); color:#001015}
+  .modal-overlay{position:fixed; inset:0; z-index:18; display:grid; place-items:center; padding:5vh 16px; background:rgba(2,7,11,.74)}
+  .modal-box{width:min(780px,94vw); max-height:88vh; overflow:auto; background:var(--phthalo2); border:1px solid var(--straw-dim); box-shadow:0 18px 60px #000c; padding:16px}
+  body.elite .modal-overlay{background:rgba(1,5,8,.84)}
+  body.elite .modal-box{background:#031017; border-color:var(--royal); box-shadow:0 0 0 1px rgba(0,0,0,.6), 0 0 40px #000c}
   .title-screen{position:fixed; inset:0; z-index:40; display:grid; place-items:center; overflow:auto;
     background:radial-gradient(ellipse at 50% 35%, rgba(9,42,54,.62), transparent 62%), #02070B; color:var(--ink)}
   .title-screen[hidden]{display:none !important}
@@ -312,8 +316,8 @@
     </div>
   </div>
 </main>
-<div class="drawer-overlay" id="detail-overlay" hidden>
-  <div class="drawer">
+<div class="modal-overlay" id="detail-overlay" hidden>
+  <div class="modal-box drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
     <div class="drawer-head"><span id="drawer-title">COMMAND DETAILS</span><button class="btn small ghost" id="drawer-close">Close</button></div>
     <div id="section-ledger" class="drawer-section" hidden>
       <div class="card"><span class="pill">LEDGER</span><div class="filterbar"><select id="ledger-filter" aria-label="Ledger filter"><option value="all">All events</option><option value="arrival">Arrivals</option><option value="event">Events</option><option value="contract">Contracts</option><option value="service">Services</option><option value="contact">Contacts</option></select><input id="ledger-search" type="search" placeholder="filter ledger…"></div><div class="body ledger" id="p-ledger"></div></div>
@@ -1175,6 +1179,7 @@ function openDrawer(section){
   document.getElementById("detail-overlay").hidden = false;
   document.getElementById("drawer-title").textContent = DRAWER_TITLES[section] || "COMMAND DETAILS";
   document.querySelectorAll(".drawer-section").forEach(el => { el.hidden = el.id !== `section-${section}`; });
+  document.getElementById("drawer-close").focus();
   render();
 }
 function closeDrawer(){ document.getElementById("detail-overlay").hidden = true; drawerSection = null; }
