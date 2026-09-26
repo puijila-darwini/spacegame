@@ -237,7 +237,7 @@
       <h2>NEW CAMPAIGN</h2>
       <div class="title-field"><label for="new-captain">Captain name</label><input id="new-captain" value="Commander" maxlength="32"></div>
       <div class="title-field"><label for="new-campaign">Campaign</label><input id="new-campaign" value="Sol Merchant" maxlength="40"></div>
-      <div class="title-field"><label for="new-difficulty">Difficulty</label><select id="new-difficulty"><option value="story">Story · relaxed</option><option value="balanced" selected>Balanced · trader</option><option value="hard">Hard · unforgiving</option></select></div>
+      <div class="title-field"><label for="new-difficulty">Difficulty</label><select id="new-difficulty"><option value="story">Story · 12,000cr · 0.30dv</option><option value="balanced" selected>Balanced · 10,000cr · 0.25dv</option><option value="hard">Hard · 8,000cr · 0.22dv</option></select></div>
       <div class="title-actions"><button class="title-btn" id="new-start">START CAMPAIGN</button><button class="title-btn" id="new-back">BACK</button></div>
     </div>
     <div class="title-panel" id="title-load-panel" hidden>
@@ -1368,6 +1368,25 @@ function marketSummary(port){
   });
   return rows.length ? `<table class="book"><tr><th>market</th><th>ask</th><th>bid</th><th>spread</th></tr>${rows.join("")}</table>` : "<span class='dim'>no book</span>";
 }
+function marketScanner(){
+  const rows = [];
+  for(const [source, book] of Object.entries(SNAP.ports || {})){
+    for(const [comm, asks] of Object.entries(book.asks || {})){
+      if(!asks.length) continue;
+      const ask = Math.min(...asks.map(r => r[0]));
+      for(const [dest, other] of Object.entries(SNAP.ports || {})){
+        if(dest === source) continue;
+        const bids = (other.bids || {})[comm] || [];
+        if(!bids.length) continue;
+        const bid = Math.max(...bids.map(r => r[0]));
+        if(bid > ask) rows.push({source, dest, comm, ask, bid, margin:bid - ask});
+      }
+    }
+  }
+  rows.sort((a, b) => b.margin - a.margin);
+  const top = rows.slice(0, 8);
+  return top.length ? `<table class="book"><tr><th>route</th><th>buy</th><th>sell</th><th>gross</th></tr>${top.map(r => `<tr data-opportunity-source="${esc(r.source)}" data-opportunity-comm="${esc(r.comm)}" style="cursor:pointer"><td>${esc(r.source)} → ${esc(r.dest)}</td><td>${r.ask}</td><td>${r.bid}</td><td>${r.margin.toFixed(1)}</td></tr>`).join("")}</table><div class="tape">Gross margin before fuel and time.</div>` : "<span class='dim'>No cross-port opportunities found.</span>";
+}
 function marketPulse(port){
   const rows = Object.keys(port.asks || {}).map(comm => {
     const asks = port.asks[comm] || [], bids = (port.bids || {})[comm] || [];
@@ -1392,7 +1411,7 @@ function portPanel(){
       <button class="btn small" id="c-buy">Buy commodity</button>
       <button class="btn small ghost" id="c-sell">Sell cargo</button></div>`;
   }
-  h += `${marketPulse(p)}<div class="tape">SPREAD</div>${marketSummary(p)}
+  h += `${marketPulse(p)}<div class="tape">DEAL SCANNER</div>${marketScanner()}<div class="tape">SPREAD</div>${marketSummary(p)}
     <div class="tape">ASKS</div>${bookTable("asks", p.asks)}
     <div class="tape">BIDS</div>${bookTable("bids", p.bids)}
     <div class="tape">TAPE</div><div class="tape">${last}</div>`;
@@ -1573,6 +1592,15 @@ function render(){
   if(bodyFocus) bodyFocus.onclick = enterSystemView;
   document.querySelectorAll("[data-open]").forEach(button => {
     button.onclick = () => openDrawer(button.dataset.open);
+  });
+  document.querySelectorAll("[data-opportunity-source]").forEach(row => {
+    row.onclick = () => {
+      sel.port = row.dataset.opportunitySource;
+      sel.body = row.dataset.opportunitySource;
+      render();
+      const commodity = document.getElementById("c-comm");
+      if(commodity) commodity.value = row.dataset.opportunityComm;
+    };
   });
   document.querySelectorAll("[data-report-open]").forEach(button => {
     button.onclick = () => openDrawer(button.dataset.reportOpen);

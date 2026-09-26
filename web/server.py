@@ -26,6 +26,11 @@ from sim import time as simtime  # noqa: E402
 from sim.state import build_sol  # noqa: E402
 
 SAVE = os.environ.get("SPACEGAME_SAVE", "/home/pthag/ai/tmp/spacegame/live.json")
+DIFFICULTY = {
+    "story": {"credits": 12000.0, "dv": 0.30, "label": "Story"},
+    "balanced": {"credits": 10000.0, "dv": 0.25, "label": "Balanced"},
+    "hard": {"credits": 8000.0, "dv": 0.22, "label": "Hard"},
+}
 
 
 def fresh_game(captain: str = "Commander", difficulty: str = "balanced",
@@ -34,8 +39,13 @@ def fresh_game(captain: str = "Commander", difficulty: str = "balanced",
     markets.seed(g)
     contacts.seed(g)
     infra.seed(g)
+    settings = DIFFICULTY.get(difficulty, DIFFICULTY["balanced"])
+    g.credits = settings["credits"]
+    g.difficulty = difficulty if difficulty in DIFFICULTY else "balanced"
+    for ship in g.ships.values():
+        ship.dv_cap = settings["dv"]
+        ship.dv = settings["dv"]
     g.captain = captain or "Commander"
-    g.difficulty = difficulty or "balanced"
     g.campaign = campaign or "Sol Merchant"
     return g
 

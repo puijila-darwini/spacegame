@@ -115,6 +115,7 @@ def test_save_slots_and_new_game():
     assert any(s["slot"] == "test_slot" and s["label"] == "Test Slot" for s in body["saves"])
     code, body = call("POST", "/api/new", {"captain": "Test Captain", "difficulty": "hard"})
     assert code == 200 and body["result"]["captain"] == "Test Captain"
+    assert body["snapshot"]["credits"] == 8000 and body["snapshot"]["ships"][0]["dv"] == 0.22
     code, body = call("POST", "/api/save", {"slot": "captain_slot"})
     assert code == 200
     code, body = call("GET", "/api/saves")
