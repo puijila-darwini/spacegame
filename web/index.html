@@ -328,8 +328,14 @@
     <div id="section-ship" class="drawer-section" hidden>
       <div class="card"><span class="pill">SHIP</span><div class="body" id="p-ship"></div></div>
     </div>
+    <div id="section-flight" class="drawer-section" hidden>
+      <div class="card"><span class="pill">FLIGHT PLANNER</span><div class="body" id="p-flight"></div></div>
+    </div>
     <div id="section-port" class="drawer-section" hidden>
       <div class="card"><span class="pill">MARKET</span><div class="body" id="p-port"></div></div>
+    </div>
+    <div id="section-report" class="drawer-section" hidden>
+      <div class="card"><span class="pill">ARRIVAL REPORT</span><div class="body" id="p-report"></div></div>
     </div>
     <div id="section-ops" class="drawer-section" hidden>
       <div class="card"><span class="pill">WATCH / ARRIVALS</span><div class="body" id="p-ops"></div></div>
@@ -386,6 +392,8 @@ let DRAW_SNAP = null, transition = null;
 let gesture = null;
 let ledgerFilter = "all", ledgerQuery = "", contractFilter = "all", contactQuery = "";
 let diagnostics = false, commandIndex = 0, toastSeq = 0;
+let REPORT_ITEMS = [];
+let pendingReport = false;
 let TRAILS = {};
 let frameCount = 0, fps = 0, lastFpsAt = performance.now();
 const pointers = new Map();
@@ -489,6 +497,7 @@ async function act(action, payload){
   status("ok · t=" + j.snapshot.t + "d");
   setSnapshot(j.snapshot, true);
   render();
+  if(pendingReport && document.getElementById("title-screen").hidden){ pendingReport = false; openDrawer("report"); }
   return j.result;
 }
 function pointOnArc(points, progress){
@@ -585,9 +594,14 @@ function setSnapshot(next, animate = true){
     sel.location = newShip.loc || null;
     if(next.ports && next.ports[newShip.at]) sel.port = newShip.at;
   }
-  if(oldLedger && newLedger && (oldLedger.t !== newLedger.t || oldLedger.msg !== newLedger.msg))
-    toast(`${String(newLedger.kind || "event").toUpperCase()}: ${newLedger.msg}`);
-  if(oldTime !== null && next.t < oldTime) TRAILS = {};
+  const oldKeys = new Set((SNAP && SNAP.ledger || []).map(e => `${e.t}|${e.msg}`));
+  const freshEntries = (next.ledger || []).filter(e => !oldKeys.has(`${e.t}|${e.msg}`));
+  if(freshEntries.length){
+    REPORT_ITEMS = freshEntries;
+    pendingReport = true;
+    toast(`${String(freshEntries[freshEntries.length - 1].kind || "event").toUpperCase()}: ${freshEntries[freshEntries.length - 1].msg}`);
+  }
+  if(oldTime !== null && next.t < oldTime){ TRAILS = {}; REPORT_ITEMS = []; pendingReport = false; }
   SNAP = next;
   recordTrails(next);
   if(animate && previous && oldTime !== null && next.t > oldTime){
@@ -795,7 +809,7 @@ function poll(){ setInterval(async () => {
   if(!LIVE || (document.activeElement && document.activeElement.closest(".card"))) return; // don't clobber inputs
   try{
     const r = await fetch("/api/snapshot", {cache:"no-store"});
-    if(r.ok){ setSnapshot(await r.json(), true); render(); }
+    if(r.ok){ setSnapshot(await r.json(), true); render(); if(pendingReport && document.getElementById("title-screen").hidden){ pendingReport = false; openDrawer("report"); } }
   }catch(e){}
 }, 2500); }
 document.getElementById("reload").onclick = () => boot(false);
@@ -1172,7 +1186,7 @@ function toggleStored(set, id, storageName){
   saveLocalSet(storageName, set);
   render();
 }
-const DRAWER_TITLES = {ledger:"LEDGER", body:"BODY / FRAME", ship:"SHIP", port:"MARKET", ops:"WATCH / ARRIVALS", contracts:"CONTRACTS", contacts:"CONTACTS", settings:"SETTINGS"};
+const DRAWER_TITLES = {ledger:"LEDGER", body:"BODY / FRAME", ship:"SHIP", flight:"FLIGHT PLANNER", port:"MARKET", ops:"WATCH / ARRIVALS", contracts:"CONTRACTS", contacts:"CONTACTS", settings:"SETTINGS", report:"ARRIVAL REPORT"};
 let drawerSection = null;
 function openDrawer(section){
   drawerSection = section;
@@ -1191,8 +1205,9 @@ function hudPanel(){
   const summary = nextPort ? Object.keys(nextPort.asks || {}).length : 0;
   return `<div class="rowline"><span class="cname">PC-1 · ${esc(where)}</span><span>${cargo}t hold · ${s ? s.dv.toFixed(2) : "—"} dv</span></div>
     <div class="tape">CURRENT PORT · ${esc((sel.port || "—").toUpperCase())} · ${summary} markets</div>
-    <div class="ctl"><button class="hud-button" data-open="port">Open market</button><button class="hud-button" data-open="ship">Ship</button>
+    <div class="ctl"><button class="hud-button" data-open="port">Open market</button><button class="hud-button" data-open="flight">Plan flight</button><button class="hud-button" data-open="ship">Ship</button>
       <button class="hud-button" data-open="ledger">Log</button><button class="hud-button" data-open="ops">Watch</button>
+      <button class="hud-button" data-open="contracts">Contracts</button><button class="hud-button" data-open="contacts">Contacts</button>
       <button class="hud-button" data-open="settings">Settings</button><button class="hud-button" id="hud-help">Help</button></div>`;
 }
 function activityPanel(){
@@ -1211,6 +1226,23 @@ function settingsPanel(){
     <div class="rowline"><span>Jump to world</span><select id="settings-jump">${bodyOptions(sel.body)}</select></div>
     <div class="ctl"><button class="hud-button" id="settings-save">Save campaign</button><button class="hud-button" id="settings-load">Load campaign</button></div>
     <div class="ctl"><button class="hud-button" id="settings-reset">Reset campaign</button><label class="hud-button" for="file">Load snapshot</label></div>`;
+}
+function flightPanel(){
+  const s = SNAP.ships.find(x => x.id === sel.ship) || SNAP.ships[0];
+  if(!s) return "<span class='dim'>no ship</span>";
+  if(s.leg) return `<div class="rowline"><span class="cname">IN TRANSIT</span><span class="badge royal">${s.eta_d.toFixed(0)}d</span></div><div class="tape">Destination: ${esc(s.leg.to)}</div><div class="ctl"><button class="hud-button" id="flight-advance">Advance to arrival</button></div>`;
+  if(!LIVE) return "<span class='dim'>Flight planning requires the live server.</span>";
+  return `<div class="tape">Choose a route. The preview shows the time, fuel, and arrival cost before you commit.</div>
+    <div class="ctl"><label class="mini" for="c-dest">Destination world</label><select id="c-dest">${destOptions(s.at, sel.body)}</select>
+      <label class="mini"><input type="checkbox" id="c-surf"> land on destination surface</label>
+      <label class="mini" for="c-by">arrive by (optional)</label><input type="number" id="c-by" placeholder="t = …" style="width:110px"></div>
+    <div class="ctl"><button class="hud-button" id="c-prev">Preview route</button><button class="hud-button" id="c-go">Commit flight</button></div>
+    ${PREVIEW ? `<div class="preview">${esc(PREVIEW)}</div>` : ""}`;
+}
+function reportPanel(){
+  if(!REPORT_ITEMS.length) return "<span class='dim'>No new report.</span>";
+  return `<div class="tape">The sector moved while you were away.</div>${REPORT_ITEMS.map(e => `<div class="activity-row"><span>${esc((e.kind || "event").toUpperCase())}</span><span>${esc(e.msg)}</span></div>`).join("")}
+    <div class="ctl"><button class="hud-button" data-report-open="port">Open market</button><button class="hud-button" data-report-close="true">Continue</button></div>`;
 }
 function guidePanel(){
   const s = SNAP.ships.find(x => x.id === sel.ship) || SNAP.ships[0];
@@ -1270,18 +1302,11 @@ function shipPanel(){
     <div class="rowline"><span>hold</span><span>${cargo} <span class="dim">/ ${s.cargo_cap}t</span></span></div>
     <div class="rowline"><span>tank</span><span>${s.dv} <span class="dim">/ ${s.dv_cap} dv</span></span></div>`;
   if(LIVE && !s.leg){
-    const targetHint = target ? `<div class="rowline"><span class="tape">selected destination</span><span><b>${esc(target.id[0].toUpperCase() + target.id.slice(1))}</b> <button class="btn small ghost" id="c-plan-target">Plan selected orbit</button></span></div>` : "";
-    h += targetHint + `<div class="ctl"><label class="mini" for="c-dest">Destination world</label><select id="c-dest">${destOptions(s.at, sel.body)}</select>
-      <label class="mini"><input type="checkbox" id="c-surf"> land on destination surface</label>
-      <label class="mini" for="c-by">arrive by (optional)</label>
-      <input type="number" id="c-by" placeholder="t = …" style="width:110px">
-      <button class="btn small ghost" id="c-prev">Preview route</button>
-      <button class="btn small" id="c-go">Commit flight</button></div>
+    h += `<div class="ctl"><button class="hud-button" data-open="flight">Plan a flight</button></div>
       ${selectedLocation ? `<div class="rowline"><span class="tape">selected local location</span><span><b>${esc(selectedLocation.name)}</b> · ${esc(selectedLocation.kind)}</span></div>` : ""}
       <div class="ctl"><label class="mini" for="c-loc">Local site</label><select id="c-loc">${locOptions(s.at, sel.location)}</select>
       <button class="btn small ghost" id="c-transfer">Move ship here</button>
-      <button class="btn small ghost" id="c-fuel">Refuel here</button></div>
-      ${PREVIEW ? `<div class="preview">${esc(PREVIEW)}</div>` : ""}`;
+      <button class="btn small ghost" id="c-fuel">Refuel here</button></div>`;
   }
   return h;
 }
@@ -1310,6 +1335,16 @@ function marketSummary(port){
   });
   return rows.length ? `<table class="book"><tr><th>market</th><th>ask</th><th>bid</th><th>spread</th></tr>${rows.join("")}</table>` : "<span class='dim'>no book</span>";
 }
+function marketPulse(port){
+  const rows = Object.keys(port.asks || {}).map(comm => {
+    const asks = port.asks[comm] || [], bids = (port.bids || {})[comm] || [];
+    const ask = asks.length ? Math.min(...asks.map(r => r[0])) : null;
+    const bid = bids.length ? Math.max(...bids.map(r => r[0])) : null;
+    return ask !== null && bid !== null ? {comm, spread:ask - bid} : null;
+  }).filter(Boolean).sort((a, b) => b.spread - a.spread);
+  const best = rows[0];
+  return best ? `<div class="preview">Widest local spread: <b>${esc(best.comm)}</b> · ${best.spread.toFixed(1)}cr <button class="hud-button" data-open="flight">Plan a flight</button></div>` : "";
+}
 function portPanel(){
   const p = SNAP.ports[sel.port];
   if(!p) return "<span class='dim'>click a port world</span>";
@@ -1324,7 +1359,7 @@ function portPanel(){
       <button class="btn small" id="c-buy">Buy commodity</button>
       <button class="btn small ghost" id="c-sell">Sell cargo</button></div>`;
   }
-  h += `<div class="tape">SPREAD</div>${marketSummary(p)}
+  h += `${marketPulse(p)}<div class="tape">SPREAD</div>${marketSummary(p)}
     <div class="tape">ASKS</div>${bookTable("asks", p.asks)}
     <div class="tape">BIDS</div>${bookTable("bids", p.bids)}
     <div class="tape">TAPE</div><div class="tape">${last}</div>`;
@@ -1428,6 +1463,7 @@ function wireLive(){
   if(!LIVE) return;
   const on = (id, fn) => { const el = document.getElementById(id); if(el) el.onclick = fn; };
   const ship = SNAP.ships.find(x => x.id === sel.ship) || SNAP.ships[0];
+  on("flight-advance", nextEvent);
   on("c-prev", () => plotOrbit(ship, document.getElementById("c-dest").value));
   on("c-plan-target", () => {
     if(sel.body && sel.body !== "sun" && sel.body !== ship.at)
@@ -1477,8 +1513,10 @@ function render(){
   document.getElementById("p-hud").innerHTML = hudPanel();
   document.getElementById("p-activity").innerHTML = activityPanel();
   document.getElementById("p-settings").innerHTML = settingsPanel();
+  document.getElementById("p-report").innerHTML = reportPanel();
   document.getElementById("p-body").innerHTML = bodyPanel();
   document.getElementById("p-ship").innerHTML = shipPanel();
+  document.getElementById("p-flight").innerHTML = flightPanel();
   document.getElementById("p-port").innerHTML = portPanel();
   document.getElementById("p-ops").innerHTML = opsPanel();
   document.getElementById("p-contracts").innerHTML = contractPanel();
@@ -1490,6 +1528,10 @@ function render(){
   document.querySelectorAll("[data-open]").forEach(button => {
     button.onclick = () => openDrawer(button.dataset.open);
   });
+  document.querySelectorAll("[data-report-open]").forEach(button => {
+    button.onclick = () => openDrawer(button.dataset.reportOpen);
+  });
+  document.querySelectorAll("[data-report-close]").forEach(button => { button.onclick = closeDrawer; });
   const hudHelp = document.getElementById("hud-help");
   if(hudHelp) hudHelp.onclick = openPalette;
   const settingsTheme = document.getElementById("settings-theme");
