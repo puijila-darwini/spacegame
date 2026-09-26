@@ -9,7 +9,7 @@ import json
 import time as walltime
 
 from . import time as simtime
-from .state import Game, Leg, Ship, build_sol
+from .state import Game, Leg, Ship, build_sol, seed_gate
 
 SAVE_VERSION = 0
 
@@ -35,7 +35,7 @@ def to_dict(game: Game) -> dict:
             "known": game.known, "contracts": game.contracts,
             "contract_seq": game.contract_seq, "locations": game.locations,
             "meta": {"captain": game.captain, "difficulty": game.difficulty,
-                     "campaign": game.campaign}}
+                     "campaign": game.campaign, "company": game.company}}
 
 
 def from_dict(data: dict) -> Game:
@@ -68,6 +68,10 @@ def from_dict(data: dict) -> Game:
     game.captain = meta.get("captain", "Commander")
     game.difficulty = meta.get("difficulty", "balanced")
     game.campaign = meta.get("campaign", "Sol Merchant")
+    game.company = meta.get("company", "") or f"{game.captain}'s Company"
+    # Gates are fixture state, not player state: re-seed so saves written
+    # before the gate existed still come up with the mouth on the chart.
+    seed_gate(game)
     return game
 
 

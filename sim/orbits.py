@@ -14,8 +14,13 @@ from __future__ import annotations
 import math
 
 MU_SUN = 0.0003046174  # MUD-literal: Tern (a=1.0) -> 360d year; radii Kepler-solved below
-MU_TERN = 6.8539e-07  # Moon (a=0.025) -> 30d, Tide (a=0.0358) -> 360/7 d ≈ 51.43d
-MU_FULMAIOR = 2.9609e-05  # Eope (a=0.03) -> 6d, Cenaedo -> 16d, Cteta -> 38d
+# Planetocentric mu is tied to the moon radii below. The renderer puts the
+# innermost moon ~18 planet-radii out and station rings deep inside it, so
+# these mu values are large by design: n = sqrt(mu/a^3) is what actually fixes
+# each moon's period, and the radii are free to look right. Scaling a moon's
+# radius by k only requires scaling its parent's mu by k^3 to hold the clock.
+MU_TERN = 3.509193e-04  # Moon (a=0.2000) -> 30d, Tide (a=0.2864) -> 360/7 d ≈ 51.43d
+MU_FULMAIOR = 6.395504e-03  # Eope (a=0.1800) -> 6d, Cenaedo (0.3462) -> 16d, Cteta (0.6156) -> 38d
 MU_BY_PARENT = {"tern": MU_TERN, "fulmaior": MU_FULMAIOR}
 TAU = math.tau
 
@@ -27,6 +32,18 @@ MOON_DV = {"moon": 0.015, "tide": 0.025, "eope": 0.018, "cenaedo": 0.022, "cteta
 
 class WindowError(RuntimeError):
     pass
+
+
+def _refuse_gate(o, d) -> None:
+    """Gates are charted, not sailable. Inter-system transit is not wired up.
+
+    Refusing here (rather than in the renderer) keeps the destination list
+    honest: there is no dv budget or wait time that would buy a crossing.
+    """
+    if d.kind == "wormhole":
+        raise ValueError("the gate mouth is charted but not commissioned for transit")
+    if o.kind == "wormhole":
+        raise ValueError("departing the gate is not possible — no crossing exists yet")
 
 
 def mean_motion(a: float, mu: float) -> float:
@@ -51,6 +68,8 @@ def _helio_pair(bodies: dict, body_id: str) -> tuple[float, float]:
     if b.parent is not None:
         p = bodies[b.parent]
         return (p.a, p.angle0)
+    if b.a <= 0:
+        return (0.0, b.angle0)
     return (b.a, b.angle0)
 
 
@@ -166,6 +185,7 @@ def next_window(bodies: dict, origin_id: str, dest_id: str, t_now: float) -> dic
     d = bodies[dest_id]
     if o.kind == "star" or d.kind == "star":
         raise ValueError("the star is not a port")
+    _refuse_gate(o, d)
     t1 = float(t_now)
     waits: dict = {}
     dv = 0.0
@@ -228,6 +248,7 @@ def fast_option(bodies: dict, origin_id: str, dest_id: str,
     d = bodies[dest_id]
     if o.kind == "star" or d.kind == "star":
         raise ValueError("the star is not a port")
+    _refuse_gate(o, d)
     t = float(t_now)
     if not arrive_by > t:
         raise ValueError("deadline is in the past")

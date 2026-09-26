@@ -40,7 +40,7 @@ def call(method, path, payload=None):
 def test_snapshot_shape():
     code, body = call("GET", "/api/snapshot")
     assert code == 200
-    assert body["v"] == 3 and len(body["bodies"]) == 11 and len(body["locations"]) == 18
+    assert body["v"] == 3 and len(body["bodies"]) == 12 and len(body["locations"]) == 18
     assert body["campaign"]["captain"] == "Commander"
     assert len(body["contacts"]) == 14
 
@@ -129,6 +129,78 @@ def test_save_slots_and_new_game():
     assert code == 400
 
 
+def test_new_game_company_and_ship_name():
+    code, body = call("POST", "/api/new", {"captain": "Ilsa Marr",
+                                           "company": "Marr & Vance",
+                                           "ship_name": "Kestrel",
+                                           "difficulty": "balanced"})
+    assert code == 200 and body["ok"]
+    result = body["result"]
+    assert result["company"] == "Marr & Vance", result
+    assert result["ship"] == "Kestrel", result
+    campaign = body["snapshot"]["campaign"]
+    assert campaign["company"] == "Marr & Vance" and campaign["captain"] == "Ilsa Marr"
+    assert body["snapshot"]["ships"][0]["name"] == "Kestrel"
+
+
+def test_new_game_defaults_company_and_ship():
+    code, body = call("POST", "/api/new", {"captain": "Rell"})
+    assert code == 200
+    # Blank fields must still produce a usable identity, not empty strings.
+    assert body["result"]["company"] == "Rell's Company"
+    assert body["result"]["ship"], "starting ship needs a default name"
+
+
+def test_company_and_ship_survive_save_load():
+    call("POST", "/api/new", {"captain": "Ossian", "company": "Ossian Freight",
+                              "ship_name": "Marginalia"})
+    call("POST", "/api/save", {"slot": "identity_slot"})
+    code, body = call("GET", "/api/saves")
+    slot = next(s for s in body["saves"] if s["slot"] == "identity_slot")
+    assert slot["company"] == "Ossian Freight" and slot["ship"] == "Marginalia"
+    call("POST", "/api/reset", {})
+    code, body = call("POST", "/api/load", {"slot": "identity_slot"})
+    assert code == 200 and body["ok"]
+    assert body["snapshot"]["campaign"]["company"] == "Ossian Freight"
+    assert body["snapshot"]["ships"][0]["name"] == "Marginalia"
+    call("POST", "/api/delete-save", {"slot": "identity_slot"})
+
+
+def test_gate_is_charted_beyond_fulmaior():
+    code, body = call("GET", "/api/snapshot")
+    assert code == 200
+    bodies = {b["id"]: b for b in body["bodies"]}
+    assert "gate" in bodies, "the gate must exist on the chart"
+    assert bodies["gate"]["a"] > bodies["fulmaior"]["a"], "gate must lie beyond Fulmaior"
+    assert bodies["gate"]["kind"] == "wormhole"
+    gates = body["gates"]
+    assert len(gates) == 1 and gates[0]["dest_system"]
+    assert gates[0]["transit"] is False, "inter-system transit is not wired up yet"
+
+
+def test_gate_refuses_flight_planning():
+    code, body = call("POST", "/api/plot", {"ship": "pc1", "dest": "gate"})
+    assert code == 400, "planning to the gate must be refused cleanly"
+    assert "gate" in body["error"].lower()
+    code, body = call("POST", "/api/commit", {"ship": "pc1", "dest": "gate"})
+    assert code == 400
+
+
+def test_gate_opens_over_time():
+    call("POST", "/api/reset", {})
+    code, body = call("GET", "/api/snapshot")
+    assert body["gates"][0]["status"] == "sealed"
+    call("POST", "/api/advance", {"days": 300})
+    code, body = call("GET", "/api/snapshot")
+    gate = body["gates"][0]
+    assert gate["status"] == "stabilising" and gate["eta_d"] < 120
+    call("POST", "/api/advance", {"days": 150})
+    code, body = call("GET", "/api/snapshot")
+    gate = body["gates"][0]
+    assert gate["status"] == "open" and gate["eta_d"] == 0
+    assert gate["transit"] is False, "an open gate still has no commissioned transit"
+
+
 if __name__ == "__main__":
     tmp = tempfile.mkdtemp(prefix="spacegame-live-")
     srv = live.make_server(0, os.path.join(tmp, "live.json"))
@@ -145,6 +217,12 @@ if __name__ == "__main__":
         ("reset", test_reset),
         ("auto_toggle", test_auto_toggle),
         ("save_slots_new_game", test_save_slots_and_new_game),
+        ("new_game_company_ship", test_new_game_company_and_ship_name),
+        ("new_game_identity_defaults", test_new_game_defaults_company_and_ship),
+        ("identity_save_roundtrip", test_company_and_ship_survive_save_load),
+        ("gate_charted", test_gate_is_charted_beyond_fulmaior),
+        ("gate_refuses_flight", test_gate_refuses_flight_planning),
+        ("gate_opens_over_time", test_gate_opens_over_time),
     ]
     ok = all(check(n, f) for n, f in tests)
     print(f"\n{len(PASS)}/{len(tests)} passed")

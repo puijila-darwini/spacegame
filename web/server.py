@@ -23,7 +23,7 @@ HOST = os.environ.get("SPACEGAME_HOST", "0.0.0.0")
 
 from sim import api, contacts, contracts, infra, markets, persist, ships  # noqa: E402
 from sim import time as simtime  # noqa: E402
-from sim.state import build_sol  # noqa: E402
+from sim.state import build_sol, seed_gate  # noqa: E402
 
 SAVE = os.environ.get("SPACEGAME_SAVE", "/home/pthag/ai/tmp/spacegame/live.json")
 DIFFICULTY = {
@@ -31,14 +31,18 @@ DIFFICULTY = {
     "balanced": {"credits": 10000.0, "dv": 0.25, "label": "Balanced"},
     "hard": {"credits": 8000.0, "dv": 0.22, "label": "Hard"},
 }
+# You start with one hull, free — it is the anchor for the whole arc.
+STARTING_SHIP = {"id": "pc1", "name": "Wayfarer"}
 
 
 def fresh_game(captain: str = "Commander", difficulty: str = "balanced",
-               campaign: str = "Sol Merchant"):
+               campaign: str = "Sol Merchant", company: str = "",
+               ship_name: str = ""):
     g = build_sol()
     markets.seed(g)
     contacts.seed(g)
     infra.seed(g)
+    seed_gate(g)
     settings = DIFFICULTY.get(difficulty, DIFFICULTY["balanced"])
     g.credits = settings["credits"]
     g.difficulty = difficulty if difficulty in DIFFICULTY else "balanced"
@@ -47,6 +51,10 @@ def fresh_game(captain: str = "Commander", difficulty: str = "balanced",
         ship.dv = settings["dv"]
     g.captain = captain or "Commander"
     g.campaign = campaign or "Sol Merchant"
+    g.company = (company or "").strip() or f"{g.captain}'s Company"
+    hull = g.ships.get(STARTING_SHIP["id"])
+    if hull is not None:
+        hull.name = (ship_name or "").strip() or STARTING_SHIP["name"]
     return g
 
 
@@ -86,6 +94,7 @@ class Store:
                 "credits": data.get("credits", 0), "captain": meta.get("captain", "Commander"),
                 "difficulty": meta.get("difficulty", "balanced"),
                 "campaign": meta.get("campaign", "Sol Merchant"),
+                "company": meta.get("company", ""),
                 "ship": ship.get("name", "PC-1")}
 
     def list_saves(self) -> list:
@@ -146,10 +155,14 @@ class Store:
             if name == "new":
                 self.game = fresh_game(p.get("captain", "Commander"),
                                        p.get("difficulty", "balanced"),
-                                       p.get("campaign", "Sol Merchant"))
+                                       p.get("campaign", "Sol Merchant"),
+                                       p.get("company", ""),
+                                       p.get("ship_name", ""))
                 self._save()
                 return {"new": True, "captain": self.game.captain,
-                        "difficulty": self.game.difficulty, "campaign": self.game.campaign}
+                        "difficulty": self.game.difficulty, "campaign": self.game.campaign,
+                        "company": self.game.company,
+                        "ship": self.game.ships[STARTING_SHIP["id"]].name}
             if name == "advance":
                 days = float(p.get("days", 1))
                 if days <= 0 or days > 3650:

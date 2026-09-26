@@ -1,13 +1,14 @@
 """sim -> renderer contract v3: snapshot(t) the web canvas just draws.
 
 Shape:
-{v:3, t, credits, campaign:{captain,difficulty,name}, bodies:[{id,parent,kind,a,period,angle,x,y}],
- ships:[{id,at,loc,loc_to,leg,x,y,progress,eta_d,arc_pts,cargo,cargo_cap,dv,dv_cap}],
+{v:3, t, credits, campaign:{captain,difficulty,name,company}, bodies:[{id,name,parent,kind,a,period,angle,x,y}],
+ ships:[{id,name,at,loc,loc_to,leg,x,y,progress,eta_d,arc_pts,cargo,cargo_cap,dv,dv_cap}],
  ports:{port_id:{asks,bids,last}}, ledger:[...],
  locations:[{id,name,body,kind,depart_dv,arrive_dv,service,x,y,orbit_a,orbit_period,orbit_angle}],
  contacts:[{id,name,port,occupation,reliability,rapport}],
  known:{port_id:[parties]},
- contracts:[{id,issuer,port,dest,comm,qty,delivered,price,deadline,status,known}]}
+ contracts:[{id,issuer,port,dest,comm,qty,delivered,price,deadline,status,known}],
+ gates:[{id,body,status,dest_system,note,open_t,eta_d,transit}]}
 Hohmann legs interpolate the transfer ellipse; fast/hop legs render straight.
 Order lines carry a `known` flag (party met?) and contracts carry one too —
 the renderer dims the unknown; the sim still settles everything. That is the
@@ -19,17 +20,20 @@ from __future__ import annotations
 import math
 
 from . import orbits
-from .state import Game
+from .state import Game, gate_state
 
 SNAPSHOT_VERSION = 3
 
 # Renderer-side local geometry for stations and terminals. These are
-# deliberately tiny AU-scale offsets, not navigation radii: they make orbital
-# infrastructure inspectable when the camera zooms into a world without
-# changing the movement simulation. Surfaces remain body-anchored locations.
+# deliberately tiny planetocentric offsets, not navigation radii: they make
+# orbital infrastructure inspectable when the camera zooms into a world without
+# changing the movement simulation. They must stay far INSIDE the innermost
+# moon (Tern's Moon rides at a=0.20) or the system reads inside-out — orbital
+# infrastructure would appear to sit beyond the moons. Surfaces remain
+# body-anchored locations and have no ring.
 LOCATION_ORBITS = {
-    "terminal": (0.028, 1.8, 1.3),
-    "station": (0.042, 2.6, 2.4),
+    "terminal": (0.012, 1.8, 1.3),
+    "station": (0.020, 2.6, 2.4),
 }
 
 
@@ -111,11 +115,13 @@ def snapshot(game: Game) -> dict:
         mu = orbits.MU_BY_PARENT.get(b.parent, orbits.MU_SUN) if b.parent else orbits.MU_SUN
         period = orbits.period(b.a, mu) if b.a > 0 else 0.0
         bodies.append({
-            "id": b.id, "parent": b.parent, "kind": b.kind, "a": b.a, "period": period,
+            "id": b.id, "name": b.name, "parent": b.parent, "kind": b.kind,
+            "a": b.a, "period": period,
             "angle": round(th, 4), "x": round(x, 4), "y": round(y, 4),
         })
     ships = []
     for s in game.ships.values():
+        entry_name = s.name
         if s.leg is not None:
             x, y = transfer_pos(s.leg, game.bodies, game.t)
             span = max(s.leg.t_arrive - s.leg.t_depart, 1e-9)
@@ -136,6 +142,7 @@ def snapshot(game: Game) -> dict:
                 "progress": 1.0, "eta_d": 0.0, "arc_pts": [],
             }
         entry["cargo"] = dict(s.cargo)
+        entry["name"] = entry_name
         entry["cargo_cap"] = s.cargo_cap
         entry["dv"] = round(s.dv, 4)
         entry["dv_cap"] = s.dv_cap
@@ -166,8 +173,8 @@ def snapshot(game: Game) -> dict:
                           "orbit_angle": round(orbit_angle, 6)})
     return {"v": SNAPSHOT_VERSION, "t": round(game.t, 2), "credits": round(game.credits, 2),
             "campaign": {"captain": game.captain, "difficulty": game.difficulty,
-                         "name": game.campaign},
+                         "name": game.campaign, "company": game.company},
             "bodies": bodies, "ships": ships, "ports": ports, "ledger": ledger,
-            "locations": locations,
+            "locations": locations, "gates": gate_state(game),
             "contacts": contact_list, "known": {k: list(v) for k, v in game.known.items()},
             "contracts": contract_list}

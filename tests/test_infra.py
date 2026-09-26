@@ -39,7 +39,7 @@ def expect_raise(fn, exc=(ValueError, KeyError)):
 
 
 V3_KEYS = {"v", "t", "credits", "campaign", "bodies", "ships", "ports", "ledger",
-           "locations", "contacts", "known", "contracts"}
+           "locations", "gates", "contacts", "known", "contracts"}
 
 
 def test_seed_locations():
@@ -142,7 +142,7 @@ def test_snapshot_v3():
     s = api.snapshot(g)
     assert s["v"] == 3 and set(s) == V3_KEYS
     assert len(s["locations"]) == 18
-    assert len(s["bodies"]) == 11
+    assert len(s["bodies"]) == 12  # 5 planets + sun + 5 moons + the gate
     assert all("kind" in body and "period" in body for body in s["bodies"])
     ship = s["ships"][0]
     assert ship["loc"] == "tide-surface" and ship["dv"] == ship["dv_cap"] == 0.25
@@ -181,7 +181,7 @@ def test_eope_offset_geometry():
     g = new_game()
     mx, my, _ = orbits.body_pos(g.bodies["eope"], g.bodies, 10.0)
     fx, fy, _ = orbits.body_pos(g.bodies["fulmaior"], g.bodies, 10.0)
-    assert abs(_m.hypot(mx - fx, my - fy) - 0.03) < 1e-9
+    assert abs(_m.hypot(mx - fx, my - fy) - g.bodies["eope"].a) < 1e-9
 
 
 def test_bare_moon_services():
@@ -190,6 +190,56 @@ def test_bare_moon_services():
     g.ships["pc1"].loc = "eope-surface"
     expect_raise(lambda: infra.refuel(g, "pc1"))
     expect_raise(lambda: infra.transfer_local(g, "pc1", "eope-station"))
+
+
+MOONED = ("tern", "fulmaior")
+
+
+def test_orbital_rings_sit_inside_the_innermost_moon():
+    """Stations/terminals must orbit far below the first moon.
+
+    Regression guard: rings used to ride at a=0.042 while Tern's Moon was at
+    a=0.025, so the moons rendered INSIDE the station ring and every system
+    read inside-out — the moons looked like low orbit.
+    """
+    g = new_game()
+    for parent in MOONED:
+        inner = min(b.a for b in g.bodies.values() if b.parent == parent)
+        for kind, (orbit_a, _period, _phase) in api.LOCATION_ORBITS.items():
+            assert orbit_a < inner * 0.25, f"{parent} {kind} ring {orbit_a} vs inner moon {inner}"
+
+
+def test_moon_orbits_are_well_separated():
+    """Neighbouring moons need real radial separation, not a hair's breadth."""
+    g = new_game()
+    for parent in MOONED:
+        radii = sorted(b.a for b in g.bodies.values() if b.parent == parent)
+        assert len(radii) >= 2, f"{parent} needs moons"
+        for inner, outer in zip(radii, radii[1:]):
+            assert outer / inner > 1.3, f"{parent}: {inner} -> {outer} too close"
+
+
+def test_moon_radii_are_legible_against_the_planet():
+    """The innermost moon must sit well out from the planet, not skimming it.
+
+    Combined with PLANET_DISC_DIV=18 in the renderer this is what makes a
+    system view read as a system rather than as a disc with debris on it.
+    """
+    g = new_game()
+    for parent in MOONED:
+        inner = min(b.a for b in g.bodies.values() if b.parent == parent)
+        assert inner >= 0.15, f"{parent} inner moon {inner} is too tight to the planet"
+
+
+def test_moon_periods_survive_the_radius_rescale():
+    """Radii are cosmetic; the clock is fixed by the parent's mu. Guard both."""
+    g = new_game()
+    expect = {"moon": 30.0, "tide": 360.0 / 7.0, "eope": 6.0, "cenaedo": 16.0, "cteta": 38.0}
+    for moon_id, want in expect.items():
+        body = g.bodies[moon_id]
+        mu = orbits.MU_BY_PARENT[body.parent]
+        got = orbits.period(body.a, mu)
+        assert abs(got - want) / want < 0.01, f"{moon_id} period {got} != {want}"
 
 
 if __name__ == "__main__":
@@ -209,6 +259,10 @@ if __name__ == "__main__":
         ("fulmaior_capture", test_fulmaior_moon_capture),
         ("eope_offset", test_eope_offset_geometry),
         ("bare_moon_services", test_bare_moon_services),
+        ("rings_inside_moons", test_orbital_rings_sit_inside_the_innermost_moon),
+        ("moon_separation", test_moon_orbits_are_well_separated),
+        ("moon_legibility", test_moon_radii_are_legible_against_the_planet),
+        ("periods_after_rescale", test_moon_periods_survive_the_radius_rescale),
     ]
     ok = all(check(n, f) for n, f in tests)
     print(f"\n{len(PASS)}/{len(tests)} passed")

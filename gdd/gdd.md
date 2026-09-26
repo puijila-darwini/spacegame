@@ -181,7 +181,39 @@ Fulmaior. No factions, no Greek/Latin/OE variants in v0. Fixed
 stars/systems are Bayer + zodiac (`Alpha Phocae`, `Beta Vermis`, …; 12
 signs = 12 constellations). `stars.csv`/Latin constellations unused.
 
-## 22. Open decisions
+## 22. Scales are cosmetic, periods are not (owner delta 2026-09-26)
+
+Planetocentric `a` is a RENDERER choice; the clock belongs to the parent's
+`mu`. Because `n = sqrt(mu/a³)`, rescaling a moon's radius by `k` and its
+parent's `mu` by `k³` leaves the period untouched. That decoupling is what
+lets a system *look* right without touching MUD-literal periods.
+
+Rendered ordering, and it is an ordering, not a vibe: innermost moon at
+~12–18 planet display radii; station/terminal rings far inside that. Rings
+outside the moons make a system read inside-out and moons look like low
+orbit. `PLANET_DISC_DIV` (18) and `LOCATION_ORBITS` (terminal 0.012,
+station 0.020) are the two knobs; `tests/test_infra.py` guards both
+invariants. Heliocentric overview fits the outermost charted body, not a
+hard-coded planet constant, so a new edge-of-chart object stays visible.
+
+## 23. The Fulmaior Gate (owner delta 2026-09-26)
+
+First inter-system anchor, beyond Fulmaior (a=15.0 vs 9.43). Drawn as two
+counter-rotating rings, not a disc: it is an aperture, not a world.
+
+Lifecycle is time-driven so the far side is something the player watches
+approach rather than a surprise: `sealed` → `stabilising` (120d out) →
+`open` at t=400d, ~1.1 Tern years.
+
+**Transit is refused, not faked.** `orbits` blocks the gate in both
+`next_window` and `fast_option` because no delta-v budget or wait time
+buys a crossing that doesn't exist. The far side is fixture data
+(`state.build_alpha_phocae()`), not a loaded system. This is deliberate
+scope: the anchor and the promise are real, the crossing is the next
+build. What earns inter-system travel is a freight market with a
+17-year Sol clock on the far side — not a menu item.
+
+## 24. Open decisions
 
 - Timescale: week-turns (pure strategy) vs real-time daemon (morning-check
   fantasy) — spec both, pick a sim default.

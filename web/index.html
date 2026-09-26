@@ -65,6 +65,19 @@
   .pill::after{content:""; width:14px; height:14px; background:var(--straw);
     clip-path:polygon(0 0, 100% 50%, 0 100%); margin-right:2px}
   .card .body{padding:2px 14px}
+  /* The selection card is the primary readout: whatever the pointer last
+     touched. It sits at the top of the rail and carries a lit left edge so it
+     reads as "the thing you are looking at", not as another panel. */
+  .selected-card{border-left:3px solid var(--straw); box-shadow:0 0 0 1px rgba(242,230,166,.18), 0 8px 22px rgba(0,0,0,.5)}
+  .selected-card .pill{background:var(--straw); color:#20160a}
+  .selected-card .pill::after{background:var(--royal)}
+  .sel-head{display:flex; align-items:baseline; gap:8px; padding:6px 0 2px}
+  .sel-title{font-size:19px; font-weight:700; letter-spacing:.5px}
+  .sel-kind{font-size:10.5px; letter-spacing:2px; color:var(--mut); text-transform:uppercase}
+  .sel-grid{display:grid; grid-template-columns:auto 1fr; gap:1px 10px; font-size:12.5px; margin:4px 0 2px}
+  .sel-grid dt{color:var(--mut); font-size:11px; letter-spacing:1px; text-transform:uppercase; white-space:nowrap}
+  .sel-grid dd{margin:0; text-align:right; font-variant-numeric:tabular-nums}
+  .sel-note{margin:6px 0 4px; font-size:12px; color:var(--mut); font-style:italic}
   canvas#sys{width:100%; height:auto; display:block; cursor:grab; touch-action:none;
     background:radial-gradient(closest-side, rgba(242,230,166,.05), transparent 70%)}
   canvas#sys.dragging{cursor:grabbing}
@@ -236,6 +249,8 @@
     <div class="title-panel" id="title-new-panel" hidden>
       <h2>NEW CAMPAIGN</h2>
       <div class="title-field"><label for="new-captain">Captain name</label><input id="new-captain" value="Commander" maxlength="32"></div>
+      <div class="title-field"><label for="new-company">Company</label><input id="new-company" value="Wayfarer Trading Co." maxlength="48" placeholder="your trading company"></div>
+      <div class="title-field"><label for="new-ship">First ship <small>(free with the commission)</small></label><input id="new-ship" value="Wayfarer" maxlength="32" placeholder="name your hull"></div>
       <div class="title-field"><label for="new-campaign">Campaign</label><input id="new-campaign" value="Sol Merchant" maxlength="40"></div>
       <div class="title-field"><label for="new-difficulty">Difficulty</label><select id="new-difficulty"><option value="story">Story · 12,000cr · 0.30dv</option><option value="balanced" selected>Balanced · 10,000cr · 0.25dv</option><option value="hard">Hard · 8,000cr · 0.22dv</option></select></div>
       <div class="title-actions"><button class="title-btn" id="new-start">START CAMPAIGN</button><button class="title-btn" id="new-back">BACK</button></div>
@@ -306,6 +321,10 @@
     </div>
   </div>
   <div>
+    <div class="card selected-card">
+      <span class="pill">WHAT HAVE I SELECTED</span>
+      <div class="body" id="p-selected"></div>
+    </div>
     <div class="card">
       <span class="pill">START HERE</span>
       <div class="body" id="p-guide"></div>
@@ -363,7 +382,12 @@
 <script>
 "use strict";
 let SNAP = null, LIVE = false, PREVIEW = "", QUOTE = "", AUTO_ENABLED = false;
-const sel = { body: "tide", ship: "pc1", port: "tide", location: null };
+// `body`/`ship`/`port`/`location` are the derived camera + panel context.
+// `focus` is what the player actually pointed at — the readout card shows
+// that, and it is the only way to tell "clicked the ship" from "clicked the
+// planet the ship happens to be parked at".
+const sel = { body: "tide", ship: "pc1", port: "tide", location: null, focus: null };
+const focusOn = (kind, id) => { sel.focus = { kind, id }; };
 const view = { x: 0, y: 0, zoom: 1 };
 let frameMode = "inertial";
 const THEME_KEY = "sol-merchant-theme";
@@ -375,7 +399,17 @@ let themeName = (() => { try { return localStorage.getItem(THEME_KEY) || "elite"
 let STRAW = THEMES[themeName].straw, ROYAL = THEMES[themeName].royal;
 const cv = document.getElementById("sys"), ctx = cv.getContext("2d");
 const W = cv.width, H = cv.height, CX = W / 2, CY = H / 2;
-const BASE_SCALE = Math.min(W, H) / 2 / 9.9; // MUD-literal radii: Fulmaior rides at 9.43
+// Fitted to the outermost charted body so the overview always contains the
+// whole map. It was pinned to 9.9 for the planet-only chart; the Fulmaior Gate
+// rides past that, so a hard-coded divisor pushed the gate off screen.
+let BASE_SCALE = Math.min(W, H) / 2 / 9.9;
+const OVERVIEW_MARGIN = 1.05;
+function fitBaseScale(){
+  const bodies = (SNAP && SNAP.bodies) || [];
+  const maxA = bodies.reduce((m, b) => b.a > 0 ? Math.max(m, b.a) : m, 9.9);
+  BASE_SCALE = Math.min(W, H) / 2 / (maxA * OVERVIEW_MARGIN);
+}
+const PLANET_DISC_DIV = 18; // outermost ring distance, in planet display radii
 const scale = () => BASE_SCALE * view.zoom;
 function frameOrigin(){
   const scene = DRAW_SNAP || SNAP;
@@ -578,6 +612,7 @@ function syncSelectionToShip(){
   const ship = SNAP && SNAP.ships ? SNAP.ships.find(s => s.id === sel.ship) || SNAP.ships[0] : null;
   if(!ship) return;
   sel.ship = ship.id;
+  focusOn("ship", ship.id);
   if(!ship.leg && ship.at){
     sel.body = ship.at;
     sel.location = ship.loc || null;
@@ -605,14 +640,24 @@ function setSnapshot(next, animate = true){
   }
   if(oldTime !== null && next.t < oldTime){ TRAILS = {}; REPORT_ITEMS = []; pendingReport = false; }
   SNAP = next;
+  fitBaseScale();
   recordTrails(next);
   if(animate && previous && oldTime !== null && next.t > oldTime){
-    transition = {from:previous, to:next, start:performance.now(), duration:2400};
+    // Larger jumps deserve a longer sweep: a 30-day jump carries a 30-day moon
+    // through a whole revolution, and cramming that into a second reads as a
+    // blur rather than as travel. In-flight transitions are immune to the
+    // 2.5s poll now, so the cap can be generous.
+    const span = next.t - oldTime;
+    transition = {from:previous, to:next, start:performance.now(),
+      duration:Math.max(1200, Math.min(3200, 800 + span * 40))};
     DRAW_SNAP = previous;
-  } else {
-    transition = null;
+  } else if(!transition){
+    // No time to cover and nothing in flight: jump straight to it.
     DRAW_SNAP = next;
   }
+  // A stale poll (same t, or t moving backwards) MUST NOT clear an in-flight
+  // transition. Doing so snapped every body straight to the final position
+  // part-way through the sweep, which read as a broken orbit.
 }
 function animateScene(now){
   frameCount++;
@@ -673,6 +718,8 @@ async function startNewGame(){
   try {
     titleStatus("Creating campaign…");
     await titleRequest("new", {captain:document.getElementById("new-captain").value.trim() || "Commander",
+      company:document.getElementById("new-company").value.trim(),
+      ship_name:document.getElementById("new-ship").value.trim(),
       campaign:document.getElementById("new-campaign").value.trim() || "Sol Merchant",
       difficulty:document.getElementById("new-difficulty").value});
     enterGame();
@@ -893,15 +940,18 @@ function selectHit(hit){
     sel.location = loc.id;
     sel.body = loc.body;
     if(SNAP.ports[loc.body]) sel.port = loc.body;
+    focusOn("location", loc.id);
   } else if(hit.kind === "ship"){
     const ship = SNAP.ships.find(s => s.id === hit.id);
     sel.ship = hit.id;
     if(ship && ship.at) sel.body = ship.at;
     sel.location = ship && ship.loc ? ship.loc : null;
+    focusOn("ship", hit.id);
   } else {
     sel.body = hit.id;
     sel.location = null;
     if(SNAP.ports[hit.id]) sel.port = hit.id;
+    focusOn("body", hit.id);
   }
   render();
 }
@@ -920,6 +970,7 @@ function focusLocation(locationId){
   sel.location = loc.id;
   sel.body = loc.body;
   if(SNAP.ports[loc.body]) sel.port = loc.body;
+  focusOn("location", loc.id);
   frameMode = "follow";
   document.getElementById("frame-mode").value = frameMode;
   const origin = frameOrigin();
@@ -1024,7 +1075,41 @@ function bodyDisplayRadius(body, drawScale){
     .reduce((m, b) => Math.max(m, b.a || 0), 0);
   const locationExtent = (SNAP.locations || []).filter(l => l.body === body.id)
     .reduce((m, l) => Math.max(m, l.orbit_a || 0), 0);
-  return Math.max(4, Math.min(110, Math.max(childExtent, locationExtent) * drawScale * 0.35));
+  // PLANET_DISC_DIV: the outermost ring is ~18 planet-radii out. Real systems
+  // put the first moon far outside the planet (Earth/Moon is ~60 Earth radii),
+  // so a disc proportional to the ring extent made every moon look like a
+  // low orbit. Kept explicit because the ratio IS the scale.
+  const extent = Math.max(childExtent, locationExtent);
+  return Math.max(3, Math.min(60, extent * drawScale / PLANET_DISC_DIV));
+}
+function drawGate(body, X, Y, drawScale){
+  // A gate is not a world: no disc, no orbit ring of its own to imply scale.
+  // Two counter-rotating rings plus a status-coloured throat, so it reads as
+  // an aperture and so a sealed mouth looks different from an open one.
+  const gate = (SNAP.gates || []).find(g => g.body === body.id);
+  const open = gate && gate.status === "open";
+  const near = gate && gate.status === "stabilising";
+  const R = 13;
+  ctx.save();
+  ctx.translate(X, Y);
+  ctx.strokeStyle = open ? STRAW : near ? ROYAL : tint(THEMES[themeName].mut, .75);
+  ctx.lineWidth = 2;
+  for(const [i, spin] of [[0, 1], [1, -1]].entries()){
+    ctx.save(); ctx.rotate((performance.now() / 2400) * spin + i * 0.5);
+    ctx.setLineDash(open ? [] : [3, 4]);
+    ctx.beginPath(); ctx.arc(0, 0, R + i * 4, 0.4, 0.4 + Math.PI * 1.5); ctx.stroke();
+    ctx.restore();
+  }
+  ctx.setLineDash([]);
+  ctx.fillStyle = open ? STRAW : themeLine(.5);
+  ctx.beginPath(); ctx.arc(0, 0, 4.5, 0, Math.PI * 2); ctx.fill();
+  if(sel.body === body.id){
+    ctx.strokeStyle = ROYAL; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.arc(0, 0, R + 11, 0, Math.PI * 2); ctx.stroke();
+  }
+  ctx.restore();
+  ctx.fillStyle = tint(THEMES[themeName].ink, .85); ctx.font = "11px sans-serif"; ctx.textAlign = "left";
+  ctx.fillText(labelFor(body.id) + (open ? " · OPEN" : near ? " · FORMING" : " · SEALED"), X + R + 8, Y + 4);
 }
 function drawLocationMarkers(){
   for(const loc of SNAP.locations || []){
@@ -1135,6 +1220,7 @@ function draw(){
   for(const b of SNAP.bodies){
     const X = px(b.x), Y = py(b.y);
     const r = bodyDisplayRadius(b, drawScale);
+    if(b.kind === "wormhole"){ drawGate(b, X, Y, drawScale); hitmap.push({kind:"body", id:b.id, x:X, y:Y, r:20}); continue; }
     if(b.id === "sun"){
       const g = ctx.createRadialGradient(X, Y, 1, X, Y, 26);
       g.addColorStop(0, STRAW); g.addColorStop(1, themeLine(0));
@@ -1163,7 +1249,7 @@ function draw(){
       ctx.beginPath(); ctx.arc(X, Y, 13, 0, Math.PI * 2); ctx.stroke();
     }
     ctx.fillStyle = STRAW; ctx.font = "bold 11px sans-serif"; ctx.textAlign = "left";
-    const tag = s.leg ? `${s.id.toUpperCase()} · ETA ${s.eta_d.toFixed(1)}d` : s.id.toUpperCase();
+    const tag = `${(s.name || shipName(s.id)).toUpperCase()}${s.leg ? ` · ETA ${s.eta_d.toFixed(1)}d` : ""}`;
     ctx.fillText(tag, X + 9, Y - 8);
     hitmap.push({kind:"ship", id:s.id, x:X, y:Y, r:12});
   }
@@ -1176,7 +1262,12 @@ function draw(){
 
 function destOptions(cur, selected){
   return SNAP.bodies.filter(b => b.id !== "sun" && b.id !== cur)
-    .map(b => `<option value="${b.id}"${b.id === selected ? " selected" : ""}>${b.id[0].toUpperCase() + b.id.slice(1)}</option>`).join("");
+    .map(b => {
+      const label = b.kind === "wormhole"
+        ? `${b.name || b.id} (gate — no transit yet)`
+        : b.id[0].toUpperCase() + b.id.slice(1);
+      return `<option value="${b.id}"${b.id === selected ? " selected" : ""}>${esc(label)}</option>`;
+    }).join("");
 }
 function locOptions(body, selected){
   return (SNAP.locations || []).filter(l => l.body === body)
@@ -1204,6 +1295,105 @@ function openDrawer(section){
   render();
 }
 function closeDrawer(){ document.getElementById("detail-overlay").hidden = true; drawerSection = null; }
+function selGrid(rows){
+  return `<dl class="sel-grid">${rows.filter(Boolean)
+    .map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("")}</dl>`;
+}
+function helioDistanceOf(body){
+  if(!body) return null;
+  let node = body;
+  while(node.parent) node = bodyById(node.parent);
+  return Math.hypot(node.x || 0, node.y || 0);
+}
+function selectionPanel(){
+  const f = sel.focus;
+  if(!f) return `<div class="sel-note">Click a world, a ship, or an orbital location on the map. Whatever you point at is read out here.</div>`;
+
+  if(f.kind === "ship"){
+    const ship = (SNAP.ships || []).find(s => s.id === f.id);
+    if(!ship) return `<div class="sel-note">That ship is no longer in the network.</div>`;
+    const cargo = Object.entries(ship.cargo || {});
+    const tonnes = cargo.reduce((a, [, q]) => a + q, 0);
+    const rows = [
+      ["registry", esc(shipName(ship.id))],
+      ["status", ship.leg ? `<span style="color:var(--straw)">in transit</span>` : "docked"],
+      ["location", esc(ship.leg ? `${ship.leg.from} → ${ship.leg.to}` : (ship.loc || ship.at || "—"))],
+      ["delta-v", `${ship.dv.toFixed(3)} / ${ship.dv_cap.toFixed(2)}`],
+      ["hold", `${tonnes.toFixed(0)} / ${ship.cargo_cap.toFixed(0)} t`],
+      ship.leg ? ["progress", `${(ship.progress * 100).toFixed(0)}%`] : null,
+      ship.leg ? ["eta", `${ship.eta_d.toFixed(1)} d`] : null,
+    ];
+    const manifest = cargo.length
+      ? cargo.map(([c, q]) => `<div class="rowline"><span class="cname">${esc(c)}</span><span>${q.toFixed(0)} t</span></div>`).join("")
+      : `<div class="sel-note">hold empty</div>`;
+    return `<div class="sel-head"><span class="sel-title">${esc(ship.name || shipName(ship.id))}</span><span class="sel-kind">${ship.leg ? "in transit" : "hull"}</span></div>
+      ${selGrid(rows)}
+      <div class="tape">MANIFEST</div>${manifest}
+      <div class="ctl"><button class="hud-button" data-sel-open="ship">Full report</button>
+        ${ship.leg ? "" : `<button class="hud-button" data-sel-open="flight">Plan flight</button>`}</div>`;
+  }
+
+  if(f.kind === "location"){
+    const loc = (SNAP.locations || []).find(l => l.id === f.id);
+    if(!loc) return `<div class="sel-note">That location is no longer charted.</div>`;
+    const body = bodyById(loc.body);
+    const aboard = (SNAP.ships || []).filter(s => s.loc === loc.id);
+    const rows = [
+      ["kind", esc(loc.kind)],
+      ["on", esc(body ? body.name || body.id : loc.body)],
+      loc.kind === "surface" ? null : ["orbit", `${loc.orbit_a.toFixed(3)} · ${loc.orbit_period.toFixed(1)}d`],
+      loc.kind === "surface" ? null : ["phase", `${(loc.orbit_angle * 180 / Math.PI % 360).toFixed(0)}°`],
+      ["climb", `${loc.depart_dv.toFixed(3)} dv`],
+      ["descent", `${loc.arrive_dv.toFixed(3)} dv`],
+      ["services", loc.service ? "fuel · yard" : "none"],
+      ["aboard", aboard.length ? aboard.map(s => shipName(s.id)).join(", ") : "—"],
+    ];
+    return `<div class="sel-head"><span class="sel-title">${esc(loc.name)}</span><span class="sel-kind">${esc(loc.kind)}</span></div>
+      ${selGrid(rows)}
+      <div class="ctl"><button class="hud-button" data-sel-focus-body="${esc(loc.body)}">Select ${esc(loc.body)}</button>
+        ${SNAP.ports[loc.body] ? `<button class="hud-button" data-sel-open="port">Market</button>` : ""}
+        <button class="hud-button" data-sel-open="flight">Fly here</button></div>`;
+  }
+
+  const body = bodyById(f.id);
+  if(!body) return `<div class="sel-note">Nothing selected.</div>`;
+  if(body.kind === "wormhole") return wormholePanel(body);
+  const moons = (SNAP.bodies || []).filter(b => b.parent === body.id);
+  const here = (SNAP.locations || []).filter(l => l.body === body.id);
+  const port = SNAP.ports[body.id];
+  const parent = body.parent ? bodyById(body.parent) : null;
+  const helio = helioDistanceOf(body);
+  const rows = [
+    ["kind", esc(body.kind)],
+    parent ? ["orbits", esc(parent.name || parent.id)] : null,
+    body.a > 0 ? [parent ? "radius" : "heliocentric", `${body.a.toFixed(4)}`] : null,
+    body.a > 0 ? ["period", `${body.period.toFixed(1)} d`] : null,
+    body.a > 0 ? ["phase", `${(body.angle * 180 / Math.PI % 360).toFixed(0)}°`] : null,
+    helio !== null ? ["from sun", helio.toFixed(3)] : null,
+    moons.length ? ["moons", moons.map(m => `${esc(m.name || m.id)} ${m.a.toFixed(3)}`).join("<br>")] : null,
+    here.length ? ["locations", here.map(l => esc(l.name)).join("<br>")] : null,
+    ["market", port ? `${Object.keys(port.asks || {}).length} commodities` : "none"],
+  ];
+  return `<div class="sel-head"><span class="sel-title">${esc(body.name || body.id)}</span><span class="sel-kind">${esc(body.kind)}</span></div>
+    <div class="rowline"><span class="cname">${esc(body.id)}</span><span>${esc(labelFor(body.id))}</span></div>
+    ${selGrid(rows)}
+    <div class="ctl"><button class="hud-button" data-sel-focus-body="${esc(body.id)}" data-fit="1">Focus system</button>
+      ${port ? `<button class="hud-button" data-sel-open="port">Market</button>` : ""}
+      ${body.id !== "sun" ? `<button class="hud-button" data-sel-open="flight">Fly here</button>` : ""}</div>`;
+}
+function wormholePanel(body){
+  const gate = (SNAP.gates || []).find(g => g.body === body.id);
+  return `<div class="sel-head"><span class="sel-title">${esc(body.name || body.id)}</span><span class="sel-kind">gate</span></div>
+    ${selGrid([
+      ["heliocentric", body.a.toFixed(3)],
+      ["period", `${body.period.toFixed(0)} d`],
+      ["status", gate ? esc(gate.status) : "dormant"],
+      ["leads to", gate ? esc(gate.dest_system) : "—"],
+      ["gate in", gate ? `${gate.eta_d.toFixed(0)} d` : "—"],
+    ])}
+    <div class="sel-note">${esc(gate ? gate.note : "The mouth is sealed.")}</div>
+    <div class="ctl"><button class="hud-button" data-sel-focus-body="${esc(body.id)}" data-fit="1">Focus gate</button></div>`;
+}
 function nextEventSummary(){
   const now = SNAP.t;
   const events = [];
@@ -1220,9 +1410,11 @@ function hudPanel(){
   const cargo = s ? Object.values(s.cargo || {}).reduce((a, b) => a + b, 0) : 0;
   const nextPort = SNAP.ports[sel.port];
   const summary = nextPort ? Object.keys(nextPort.asks || {}).length : 0;
-  const campaign = SNAP.campaign || {captain:"Commander", difficulty:"balanced", name:"Sol Merchant"};
-  return `<div class="rowline"><span class="cname">${esc(campaign.name)}</span><span>${esc(campaign.captain)} · ${esc(campaign.difficulty)}</span></div>
-    <div class="rowline"><span class="cname">PC-1 · ${esc(where)}</span><span>${cargo}t hold · ${s ? s.dv.toFixed(2) : "—"} dv</span></div>
+  const campaign = SNAP.campaign || {captain:"Commander", difficulty:"balanced", name:"Sol Merchant", company:""};
+  const hull = s ? (s.name || shipName(s.id)) : "—";
+  return `<div class="rowline"><span class="cname">${esc(campaign.company || campaign.name)}</span><span>${esc(campaign.captain)} · ${esc(campaign.difficulty)}</span></div>
+    <div class="rowline"><span class="cname">${esc(campaign.name)}</span><span>t=${SNAP.t.toFixed(1)}d</span></div>
+    <div class="rowline"><span class="cname">${esc(hull)} · ${esc(where)}</span><span>${cargo}t hold · ${s ? s.dv.toFixed(2) : "—"} dv</span></div>
     <div class="tape">CURRENT PORT · ${esc((sel.port || "—").toUpperCase())} · ${summary} markets</div>
     ${nextEventSummary()}
     <div class="ctl"><button class="hud-button" data-open="port">Open market</button><button class="hud-button" data-open="flight">Plan flight</button><button class="hud-button" data-open="ship">Ship</button>
@@ -1591,6 +1783,7 @@ function render(){
   const bodyJump = document.getElementById("body-jump");
   bodyJump.innerHTML = bodyOptions(sel.body);
   bodyJump.value = sel.body;
+  document.getElementById("p-selected").innerHTML = selectionPanel();
   document.getElementById("p-guide").innerHTML = guidePanel();
   document.getElementById("p-hud").innerHTML = hudPanel();
   document.getElementById("p-activity").innerHTML = activityPanel();
@@ -1609,6 +1802,15 @@ function render(){
   if(bodyFocus) bodyFocus.onclick = enterSystemView;
   document.querySelectorAll("[data-open]").forEach(button => {
     button.onclick = () => openDrawer(button.dataset.open);
+  });
+  document.querySelectorAll("[data-sel-open]").forEach(button => {
+    button.onclick = () => openDrawer(button.dataset.selOpen);
+  });
+  document.querySelectorAll("[data-sel-focus-body]").forEach(button => {
+    button.onclick = () => {
+      selectHit({kind:"body", id:button.dataset.selFocusBody});
+      if(button.dataset.fit) enterSystemView();
+    };
   });
   document.querySelectorAll("[data-opportunity-source]").forEach(row => {
     row.onclick = () => {

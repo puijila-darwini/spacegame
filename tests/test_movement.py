@@ -29,10 +29,10 @@ def wrap(x):
 
 
 def test_periods():
-    assert abs(orbits.period(1.0, orbits.MU_SUN) - 360.0) < 0.5, "Tern year"
-    assert abs(orbits.period(0.025, orbits.MU_TERN) - 30.0) < 0.2, "Moon period"
-    assert abs(orbits.period(0.0358, orbits.MU_TERN) - 360.0 / 7.0) < 0.3, "Tide period"
     g = build_sol()
+    assert abs(orbits.period(1.0, orbits.MU_SUN) - 360.0) < 0.5, "Tern year"
+    assert abs(orbits.period(g.bodies["moon"].a, orbits.MU_TERN) - 30.0) < 0.2, "Moon period"
+    assert abs(orbits.period(g.bodies["tide"].a, orbits.MU_TERN) - 360.0 / 7.0) < 0.3, "Tide period"
     assert abs(orbits.period(g.bodies["veluvy"].a, orbits.MU_SUN) - 72.0) < 0.5, "Veluvy"
     assert abs(orbits.period(g.bodies["nellus"].a, orbits.MU_SUN) - 108.0) < 0.5, "Nellus"
     assert abs(orbits.period(g.bodies["arax"].a, orbits.MU_SUN) - 4320.0) < 5.0, "Arax"
@@ -78,7 +78,7 @@ def test_moon_offset_geometry():
     g = build_sol()
     mx, my, _ = orbits.body_pos(g.bodies["moon"], g.bodies, 10.0)
     tx, ty, _ = orbits.body_pos(g.bodies["tern"], g.bodies, 10.0)
-    assert abs(math.hypot(mx - tx, my - ty) - 0.025) < 1e-9
+    assert abs(math.hypot(mx - tx, my - ty) - g.bodies["moon"].a) < 1e-9
 
 
 def test_ship_arrives():
@@ -121,9 +121,9 @@ def test_snapshot_contract():
     leg = ships.commit(g, "pc1", "arax")
     time.advance_to(g, leg.t_depart + 1.0)  # mid-transit (ship waits out its window first)
     s = api.snapshot(g)
-    assert s["v"] == 3 and set(s) == {"v", "t", "credits", "campaign", "bodies", "ships", "ports", "ledger",
+    assert s["v"] == 3 and set(s) == {"v", "t", "credits", "campaign", "bodies", "ships", "ports", "ledger", "gates",
                                       "locations", "contacts", "known", "contracts"}
-    assert len(s["bodies"]) == 11
+    assert len(s["bodies"]) == 12  # 5 planets + sun + 5 moons + the gate
     ship = s["ships"][0]
     assert ship["leg"] == {"from": "tide", "to": "arax"}
     assert 0.0 < ship["progress"] < 1.0 and ship["eta_d"] > 0
