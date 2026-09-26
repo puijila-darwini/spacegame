@@ -181,22 +181,55 @@ Fulmaior. No factions, no Greek/Latin/OE variants in v0. Fixed
 stars/systems are Bayer + zodiac (`Alpha Phocae`, `Beta Vermis`, …; 12
 signs = 12 constellations). `stars.csv`/Latin constellations unused.
 
-## 22. Scales are cosmetic, periods are not (owner delta 2026-09-26)
+## 22. Scales are real, and the clock is not attached to them (owner delta 2026-09-26)
 
-Planetocentric `a` is a RENDERER choice; the clock belongs to the parent's
-`mu`. Because `n = sqrt(mu/a³)`, rescaling a moon's radius by `k` and its
-parent's `mu` by `k³` leaves the period untouched. That decoupling is what
-lets a system *look* right without touching MUD-literal periods.
+Planetocentric `a` is a real fraction of the heliocentric chart: Moon 0.26% of
+Tern's orbit (Earth/Moon 0.257%), Cteta 0.22% of Fulmaior's (Callisto 0.24%).
+The clock belongs to the parent's `mu`. Because `n = sqrt(mu/a³)`, rescaling a
+moon's radius by `k` and its parent's `mu` by `k³` leaves the period untouched —
+so the radii can be honest without touching MUD-literal periods. They WERE
+20–29% once, to make zoomed system views look right; that put a visible ring
+around every world in the heliocentric view.
 
-Rendered ordering, and it is an ordering, not a vibe: innermost moon at
-~12–18 planet display radii; station/terminal rings far inside that. Rings
-outside the moons make a system read inside-out and moons look like low
-orbit. `PLANET_DISC_DIV` (18) and `LOCATION_ORBITS` (terminal 0.012,
-station 0.020) are the two knobs; `tests/test_infra.py` guards both
-invariants. Heliocentric overview fits the outermost charted body, not a
-hard-coded planet constant, so a new edge-of-chart object stays visible.
+The 400:1 span between a planetary orbit and a moon orbit is handled by the
+renderer, not by lying about the data:
 
-## 23. The Fulmaior Gate (owner delta 2026-09-26)
+- **System view fits the outermost ring** — absolute scale is invisible there,
+  only ratios matter. `PLANET_DISC_DIV = 60` is the real Earth/Moon figure, and
+  it is what leaves a synchronous shell at 5.6 disc-radii clear of the planet.
+  `MAX_ZOOM = 6000` to reach a real moon system.
+- **Heliocentric view suppresses sub-5px rings.** A moon system IS sub-pixel
+  from across a system; drawing it anyway stacked a ring on the planet.
+- **The star scales with the innermost planetary orbit** so its glow cannot
+  eclipse the inner system (it was a fixed 26px glow over a 22px inner system).
+
+Rendered ordering is an ordering, not a vibe: innermost moon at ~42–60 disc
+radii, synchronous shell at ~9% of the inner moon (Earth 9.3%), station inside
+that and faster than the ground. Rings outside the moons make a system read
+inside-out. Planetary radii are Kepler-consistent with MUD-literal periods, so
+their radial gaps (1.31×, 2.23×, 5.24×, 1.80×) are forced by `T ∝ a^1.5`.
+
+**Open, and deliberately not decided here:** a linear radial axis over a 27×
+span (0.342 → 9.43) puts the inner three planets inside ~22px of the star
+while the outer two dominate. The honest fix is a compressed radial projection,
+but it must warp the Hohmann arcs identically or ships visibly detach from their
+planets mid-flight. That is a design decision, not a tweak.
+
+## 23. Space elevators are synchronous (owner delta 2026-09-26)
+
+A tether's counterweight must co-rotate with the ground, so **an elevator
+terminal's orbital period is its host's sidereal rotation** (`state.ROTATION`,
+0.9–1.8d; `state.orbit_geometry` takes the terminal period straight from it).
+That co-rotation is the whole reason a tether is stable and why the 0.006dv
+ride undercuts a rocket climb — the terminal is never moving relative to the
+ground it is tied to. Inventing a period per terminal kind (it used to be a flat
+1.8d for every terminal) severs the link to the planet the tether hangs from.
+
+Stations are ordinary low orbit: inside the synchronous shell at 0.55 of its
+radius, and faster than the rotation (0.16×). The synchronous radius sits at
+~9% of the inner moon, matching Earth's 9.3%.
+
+## 24. The Fulmaior Gate (owner delta 2026-09-26)
 
 First inter-system anchor, beyond Fulmaior (a=15.0 vs 9.43). Drawn as two
 counter-rotating rings, not a disc: it is an aperture, not a world.
@@ -213,7 +246,7 @@ scope: the anchor and the promise are real, the crossing is the next
 build. What earns inter-system travel is a freight market with a
 17-year Sol clock on the far side — not a menu item.
 
-## 24. Open decisions
+## 25. Open decisions
 
 - Timescale: week-turns (pure strategy) vs real-time daemon (morning-check
   fantasy) — spec both, pick a sim default.

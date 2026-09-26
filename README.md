@@ -38,20 +38,55 @@ At higher zoom, elevator terminals and stations appear as distinct markers orbit
 
 ### System scale
 
-Planetocentric radii are sized for the renderer, not for realism at a glance: the
-innermost moon rides ~12–18 planet display radii out (`PLANET_DISC_DIV = 18` sets
-the outermost ring), and station/terminal rings sit far inside the first moon
-(Tern's terminal is 6% of Moon's orbit, its station 10%). Getting that ordering
-wrong is what makes a system read inside-out — orbital infrastructure beyond the
-moons, moons skimming the planet like low orbit.
+Planetocentric radii are **real fractions of the heliocentric chart**, not
+stylised: Moon 0.26% of Tern's orbit (Earth/Moon is 0.257%), Cteta 0.22% of
+Fulmaior's (Jupiter's Callisto is 0.24%). They were briefly 20–29%, which put
+a visible ring around every world in the heliocentric view and made the
+planetary orbits look wrong by comparison.
 
-The radii are therefore free to look right, because **periods are fixed by the
-parent's `mu`, not by the radius**: `n = sqrt(mu/a^3)`, so scaling a moon's `a`
-by `k` only needs its parent's `mu` scaled by `k^3` to hold the clock. Tern's
-moons moved out 8× and Fulmaior's 6× with no change to the MUD-literal periods
-(Moon 30d, Tide 360/7d, Eope 6d, Cenaedo 16d, Cteta 38d) — guarded by
-`tests/test_infra.py::periods_after_rescale`. The heliocentric overview fits
-itself to the outermost charted body, so the gate stays on screen.
+The renderer handles the 400:1 span between a planetary orbit and a moon orbit
+in two ways:
+
+- **System views fit the outermost ring**, so absolute scale is invisible
+  there — only ratios among moons and rings matter. `PLANET_DISC_DIV = 60` is
+  the real Earth/Moon figure (60 Earth radii), which is also what leaves room
+  for a synchronous shell at 5.6 disc-radii so an elevator ring does not sit
+  inside its own planet. `MAX_ZOOM` is 6000 to reach a real moon system.
+- **The heliocentric view suppresses anything under `MIN_RING_PX` (5px).** A
+  moon system is genuinely sub-pixel from across a system, so it collapses to a
+  speck instead of stacking a bright ring on the planet.
+
+Ordering, and it is an ordering, not a vibe: innermost moon at ~42–60 disc
+radii; synchronous shell at ~9% of the inner moon (Earth: 9.3%); station inside
+that and faster than the ground. Getting it wrong makes a system read
+inside-out — infrastructure beyond the moons, moons skimming the planet.
+
+Periods are unaffected by any of this, because they are fixed by the parent's
+`mu` and not by the radius: `n = sqrt(mu/a^3)`, so scaling a moon's `a` by `k`
+needs its parent's `mu` scaled by `k^3` to hold the clock. MUD-literal periods
+(Moon 30d, Tide 360/7d, Eope 6d, Cenaedo 16d, Cteta 38d) are guarded by
+`tests/test_infra.py::periods_after_rescale`.
+
+The planetary orbits themselves are Kepler-consistent with their MUD-literal
+periods, so the radial gaps (Veluvy→Nellus 1.31×, →Tern 2.23×, →Arax 5.24×,
+→Fulmaior 1.80×) are forced by `T ∝ a^1.5`, not chosen. The star's drawn size
+scales with the innermost planetary orbit so its glow can never eclipse the
+inner system — it used to be a fixed 26px glow over a 22px inner system.
+
+### Space elevators are synchronous
+
+A tether's counterweight must co-rotate with the ground, so **an elevator
+terminal's orbital period IS its host's sidereal rotation** —
+`state.ROTATION` (0.9–1.8d) with the terminal period taken directly from it
+(`state.orbit_geometry`). This is why the tether is stable and why the 0.006dv
+elevator ride undercuts a rocket climb. Stations are ordinary low orbit: inside
+the synchronous shell at 0.55 of its radius and correspondingly faster
+(0.16× the rotation period).
+
+Guarded by `test_terminals_are_in_synchronous_orbit`,
+`test_terminal_synchronous_radius_matches_the_planet`, and
+`test_stations_orbit_inside_and_faster_than_the_ground`. The selection card
+shows the terminal's period and the host's sidereal day side by side.
 
 ### The Fulmaior Gate
 

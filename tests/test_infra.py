@@ -5,7 +5,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from sim import api, contacts, infra, markets, orbits, persist, ships, time
+from sim import api, contacts, infra, markets, orbits, persist, ships, state, time
 from sim.state import build_sol
 
 PASS = []
@@ -205,8 +205,57 @@ def test_orbital_rings_sit_inside_the_innermost_moon():
     g = new_game()
     for parent in MOONED:
         inner = min(b.a for b in g.bodies.values() if b.parent == parent)
-        for kind, (orbit_a, _period, _phase) in api.LOCATION_ORBITS.items():
-            assert orbit_a < inner * 0.25, f"{parent} {kind} ring {orbit_a} vs inner moon {inner}"
+        for kind in ("terminal", "station"):
+            for body, loc in ((b, l) for l in g.locations.values()
+                              for b in [l["body"]] if l["kind"] == kind and l["body"] == parent):
+                orbit_a, _period, _phase = state.orbit_geometry(loc)
+                assert orbit_a < inner * 0.25, f"{body} {kind} {orbit_a} vs inner moon {inner}"
+
+
+def test_terminals_are_in_synchronous_orbit():
+    """A space elevator's counterweight must co-rotate with its planet.
+
+    This is the whole reason a tether is stable and why the elevator ride
+    undercuts a rocket climb: the terminal's orbital period is the host's
+    sidereal rotation, exactly. Invented periods (it used to be a flat 1.8d
+    for every terminal) break that link to the planet it hangs from.
+    """
+    g = new_game()
+    terminals = [l for l in g.locations.values() if l["kind"] == "terminal"]
+    assert terminals, "fixture should have at least one elevator"
+    for loc in terminals:
+        _a, period, _phase = state.orbit_geometry(loc)
+        rot = state.rotation_period(loc["body"])
+        assert abs(period - rot) < 1e-9, f"{loc['id']} period {period} != {rot} rotation"
+
+
+def test_terminal_synchronous_radius_matches_the_planet():
+    """The synchronous shell sits a real fraction of the way out to the moons.
+
+    Earth's is 9.3% of the Moon's orbit; without that ratio an elevator ring
+    ends up either inside the planet's drawn disc or level with the moons.
+    """
+    g = new_game()
+    for loc in [l for l in g.locations.values() if l["kind"] == "terminal"]:
+        parent = loc["body"]
+        moons = [b.a for b in g.bodies.values() if b.parent == parent]
+        orbit_a, _p, _ph = state.orbit_geometry(loc)
+        if not moons:
+            # Moonless host (Nellus): the shell is the outermost thing on the
+            # planet, so only the station has to sit inside it.
+            continue
+        inner = min(moons)
+        assert 0.05 < orbit_a / inner < 0.20, f"{parent} sync shell {orbit_a / inner:.3f} of inner moon"
+
+
+def test_stations_orbit_inside_and_faster_than_the_ground():
+    """Low orbit: inside the synchronous shell, and quicker than the rotation."""
+    g = new_game()
+    for loc in [l for l in g.locations.values() if l["kind"] == "station"]:
+        body = loc["body"]
+        a, period, _phase = state.orbit_geometry(loc)
+        assert a < state.SYNCHRONOUS_R.get(body, state.DEFAULT_SYNCHRONOUS_R), f"{body} station outside sync shell"
+        assert period < state.rotation_period(body), f"{body} station slower than its ground"
 
 
 def test_moon_orbits_are_well_separated():
@@ -219,16 +268,20 @@ def test_moon_orbits_are_well_separated():
             assert outer / inner > 1.3, f"{parent}: {inner} -> {outer} too close"
 
 
-def test_moon_radii_are_legible_against_the_planet():
-    """The innermost moon must sit well out from the planet, not skimming it.
+def test_moon_radii_are_a_real_fraction_of_the_heliocentric_orbit():
+    """A moon system is a fraction of a percent of the planet's own orbit.
 
-    Combined with PLANET_DISC_DIV=18 in the renderer this is what makes a
-    system view read as a system rather than as a disc with debris on it.
+    Earth's Moon is 0.257% of Earth's heliocentric radius. The moons were once
+    at 20-29% of Tern's, which put a visible ring around every world in the
+    heliocentric view and made the planetary orbits look wrong by comparison.
     """
     g = new_game()
     for parent in MOONED:
+        helio = g.bodies[parent].a
         inner = min(b.a for b in g.bodies.values() if b.parent == parent)
-        assert inner >= 0.15, f"{parent} inner moon {inner} is too tight to the planet"
+        frac = inner / helio
+        assert frac < 0.01, f"{parent} inner moon is {frac * 100:.1f}% of its own orbit"
+        assert frac > 0.0001, f"{parent} inner moon implausibly tight"
 
 
 def test_moon_periods_survive_the_radius_rescale():
@@ -260,8 +313,11 @@ if __name__ == "__main__":
         ("eope_offset", test_eope_offset_geometry),
         ("bare_moon_services", test_bare_moon_services),
         ("rings_inside_moons", test_orbital_rings_sit_inside_the_innermost_moon),
+        ("terminal_synchronous", test_terminals_are_in_synchronous_orbit),
+        ("sync_shell_ratio", test_terminal_synchronous_radius_matches_the_planet),
+        ("station_low_orbit", test_stations_orbit_inside_and_faster_than_the_ground),
         ("moon_separation", test_moon_orbits_are_well_separated),
-        ("moon_legibility", test_moon_radii_are_legible_against_the_planet),
+        ("moon_helio_fraction", test_moon_radii_are_a_real_fraction_of_the_heliocentric_orbit),
         ("periods_after_rescale", test_moon_periods_survive_the_radius_rescale),
     ]
     ok = all(check(n, f) for n, f in tests)

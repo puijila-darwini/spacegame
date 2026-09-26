@@ -14,6 +14,37 @@ GATE_BODY = "gate"
 GATE_OPEN_T = 400.0  # game-days before the mouth stabilises (~1.1 Tern years)
 GATE_DEST_SYSTEM = "Alpha Phocae"
 
+# Sidereal rotation periods, in game-days. Needed because a space elevator's
+# counterweight must hang in a SYNCHRONOUS orbit: the tether is fixed to the
+# ground, so the terminal's orbital period IS the host's sidereal rotation.
+# Without this the elevator had an invented 1.8d period and nothing tied it to
+# the planet it hangs from. Slow rotators (0.9-1.8d) keep the tether stable
+# and the 0.006dv elevator ride honest against a ~0.01-0.03 cruise.
+ROTATION = {
+    "tern": 0.90, "veluvy": 1.40, "nellus": 1.10, "arax": 1.80,
+    "fulmaior": 1.25, "moon": 4.20, "tide": 2.00,
+    "eope": 1.20, "cenaedo": 1.60, "cteta": 2.50,
+}
+
+# Radius of the SYNCHRONOUS (geostationary) orbit per body, in the same AU-ish
+# units as the heliocentric chart. Renderer geometry, not a navigation radius:
+# real Earth's synchronous orbit is 35,786 km = 0.000239 AU, and 0.000239 /
+# 0.00257 = 9.3% of the Moon's orbit, which is the ratio that makes an
+# elevator read correctly next to a moon. Bigger worlds get bigger geos.
+SYNCHRONOUS_R = {
+    "tern": 0.000240, "veluvy": 0.000240, "nellus": 0.000255,
+    "arax": 0.000205, "fulmaior": 0.000720,
+}
+DEFAULT_SYNCHRONOUS_R = 0.000240
+# A station is ordinary low orbit, well inside the synchronous shell, and
+# therefore much faster than the ground turns. At 0.55 of the synchronous
+# radius a co-rotating frame would need ~0.16x the rotation period.
+STATION_ORBIT_FRAC = 0.55
+STATION_PERIOD_FRAC = 0.16
+# Phases are arbitrary chart offsets, chosen so rings do not line up.
+PHASE_TERMINAL = 1.3
+PHASE_STATION = 2.4
+
 
 @dataclass
 class Body:
@@ -91,15 +122,19 @@ def build_sol() -> Game:
         "tern": Body("tern", "Tern", "planet", None, 1.0, 2.6),
         "arax": Body("arax", "Arax", "planet", None, 5.2415, 4.0),
         "fulmaior": Body("fulmaior", "Fulmaior", "planet", None, 9.4346, 5.2),
-        # Planetocentric radii are sized for the renderer: the innermost moon
-        # sits well outside the planet's drawn disc, and station/terminal rings
-        # sit far inside the innermost moon. Periods are fixed by the parent's
-        # mu (see sim/orbits.py), not by these numbers.
-        "moon": Body("moon", "Moon", "moon", "tern", 0.2000, 0.5),
-        "tide": Body("tide", "Tide", "moon", "tern", 0.2864, 2.0),
-        "eope": Body("eope", "Eope", "moon", "fulmaior", 0.1800, 1.0),
-        "cenaedo": Body("cenaedo", "Cenaedo", "moon", "fulmaior", 0.3462, 3.3),
-        "cteta": Body("cteta", "Cteta", "moon", "fulmaior", 0.6156, 5.0),
+        # Planetocentric radii are real: Moon 0.26% of Tern's heliocentric
+        # radius (Earth/Moon is 0.257%), Cteta 0.22% of Fulmaior's (Jupiter's
+        # Callisto is 0.24%). Periods are fixed by the parent's mu, not by
+        # these numbers -- see sim/orbits.py. The renderer fits a system view
+        # to the outermost ring, so absolute scale is invisible there; what
+        # these numbers control is the HELIOCENTRIC view, where a moon system
+        # correctly collapses to a speck. Cranking them up to look good in a
+        # zoomed system view is what put Tern's moons at 20% of its own orbit.
+        "moon": Body("moon", "Moon", "moon", "tern", 0.00260, 0.5),
+        "tide": Body("tide", "Tide", "moon", "tern", 0.003726, 2.0),
+        "eope": Body("eope", "Eope", "moon", "fulmaior", 0.00600, 1.0),
+        "cenaedo": Body("cenaedo", "Cenaedo", "moon", "fulmaior", 0.011534, 3.3),
+        "cteta": Body("cteta", "Cteta", "moon", "fulmaior", 0.020540, 5.0),
         # The gate rides beyond Fulmaior's 9.43 so it reads as the edge of the
         # charted system, not as another planet in it. The renderer fits the
         # overview to the outermost charted body, so it stays on screen.
@@ -142,6 +177,27 @@ def seed_gate(game: Game) -> None:
     """Install the Sol-side gate. Run from the same place as the other seeds."""
     game.gates = {GATE_ID: {"id": GATE_ID, "body": GATE_BODY,
                             "open_t": GATE_OPEN_T, "dest_system": GATE_DEST_SYSTEM}}
+
+
+def rotation_period(body_id: str) -> float:
+    """Sidereal rotation in days. The synchronous orbit's period, by definition."""
+    return ROTATION.get(body_id, 1.0)
+
+
+def orbit_geometry(loc: dict) -> tuple[float, float, float]:
+    """(orbit_a, period_d, phase) for a non-surface location.
+
+    A terminal is in a SYNCHRONOUS orbit, so its period is exactly the host
+    world's sidereal rotation -- that is what makes a tether stable and why the
+    elevator undercuts a rocket. A station is ordinary low orbit: inside the
+    synchronous shell and correspondingly faster.
+    """
+    body = loc["body"]
+    rot = rotation_period(body)
+    if loc["kind"] == "terminal":
+        return (SYNCHRONOUS_R.get(body, DEFAULT_SYNCHRONOUS_R), rot, PHASE_TERMINAL)
+    a = STATION_ORBIT_FRAC * SYNCHRONOUS_R.get(body, DEFAULT_SYNCHRONOUS_R)
+    return (a, rot * STATION_PERIOD_FRAC, PHASE_STATION)
 
 
 def build_alpha_phocae() -> dict:

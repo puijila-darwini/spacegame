@@ -1,10 +1,11 @@
 """sim -> renderer contract v3: snapshot(t) the web canvas just draws.
 
 Shape:
-{v:3, t, credits, campaign:{captain,difficulty,name,company}, bodies:[{id,name,parent,kind,a,period,angle,x,y}],
+{v:3, t, credits, campaign:{captain,difficulty,name,company}, bodies:[{id,name,parent,kind,a,period,rotation_d,angle,x,y}],
  ships:[{id,name,at,loc,loc_to,leg,x,y,progress,eta_d,arc_pts,cargo,cargo_cap,dv,dv_cap}],
  ports:{port_id:{asks,bids,last}}, ledger:[...],
- locations:[{id,name,body,kind,depart_dv,arrive_dv,service,x,y,orbit_a,orbit_period,orbit_angle}],
+ locations:[{id,name,body,kind,depart_dv,arrive_dv,service,x,y,orbit_a,orbit_period,
+             orbit_angle,synchronous}],
  contacts:[{id,name,port,occupation,reliability,rapport}],
  known:{port_id:[parties]},
  contracts:[{id,issuer,port,dest,comm,qty,delivered,price,deadline,status,known}],
@@ -20,21 +21,12 @@ from __future__ import annotations
 import math
 
 from . import orbits
-from .state import Game, gate_state
+from .state import Game, gate_state, orbit_geometry, rotation_period
 
 SNAPSHOT_VERSION = 3
 
-# Renderer-side local geometry for stations and terminals. These are
-# deliberately tiny planetocentric offsets, not navigation radii: they make
-# orbital infrastructure inspectable when the camera zooms into a world without
-# changing the movement simulation. They must stay far INSIDE the innermost
-# moon (Tern's Moon rides at a=0.20) or the system reads inside-out — orbital
-# infrastructure would appear to sit beyond the moons. Surfaces remain
-# body-anchored locations and have no ring.
-LOCATION_ORBITS = {
-    "terminal": (0.012, 1.8, 1.3),
-    "station": (0.020, 2.6, 2.4),
-}
+# Station/terminal geometry lives in state.orbit_geometry, because a terminal's
+# period is the host's sidereal rotation and the two cannot be separated.
 
 
 def _location_pos(game: Game, loc: dict) -> tuple[float, float, float, float]:
@@ -42,7 +34,7 @@ def _location_pos(game: Game, loc: dict) -> tuple[float, float, float, float]:
     bx, by, _ = orbits.body_pos(body, game.bodies, game.t)
     if loc["kind"] == "surface":
         return (bx, by, 0.0, 0.0)
-    orbit_a, period_d, phase = LOCATION_ORBITS[loc["kind"]]
+    orbit_a, period_d, phase = orbit_geometry(loc)
     angle = phase + math.tau * game.t / period_d
     return (bx + orbit_a * math.cos(angle),
             by + orbit_a * math.sin(angle), orbit_a, angle)
@@ -117,6 +109,7 @@ def snapshot(game: Game) -> dict:
         bodies.append({
             "id": b.id, "name": b.name, "parent": b.parent, "kind": b.kind,
             "a": b.a, "period": period,
+            "rotation_d": round(rotation_period(b.id), 4),
             "angle": round(th, 4), "x": round(x, 4), "y": round(y, 4),
         })
     ships = []
@@ -164,13 +157,14 @@ def snapshot(game: Game) -> dict:
     locations = []
     for loc in game.locations.values():
         lx, ly, orbit_a, orbit_angle = _location_pos(game, loc)
-        orbit_period = 0.0 if loc["kind"] == "surface" else LOCATION_ORBITS[loc["kind"]][1]
+        orbit_period = 0.0 if loc["kind"] == "surface" else orbit_geometry(loc)[1]
         locations.append({"id": loc["id"], "name": loc["name"], "body": loc["body"],
                           "kind": loc["kind"], "depart_dv": loc["depart_dv"],
                           "arrive_dv": loc["arrive_dv"], "service": loc["service"],
                           "x": round(lx, 6), "y": round(ly, 6),
-                          "orbit_a": orbit_a, "orbit_period": orbit_period,
-                          "orbit_angle": round(orbit_angle, 6)})
+                          "orbit_a": orbit_a, "orbit_period": round(orbit_period, 4),
+                          "orbit_angle": round(orbit_angle, 6),
+                          "synchronous": loc["kind"] == "terminal"})
     return {"v": SNAPSHOT_VERSION, "t": round(game.t, 2), "credits": round(game.credits, 2),
             "campaign": {"captain": game.captain, "difficulty": game.difficulty,
                          "name": game.campaign, "company": game.company},

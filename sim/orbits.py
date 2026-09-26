@@ -14,13 +14,14 @@ from __future__ import annotations
 import math
 
 MU_SUN = 0.0003046174  # MUD-literal: Tern (a=1.0) -> 360d year; radii Kepler-solved below
-# Planetocentric mu is tied to the moon radii below. The renderer puts the
-# innermost moon ~18 planet-radii out and station rings deep inside it, so
-# these mu values are large by design: n = sqrt(mu/a^3) is what actually fixes
-# each moon's period, and the radii are free to look right. Scaling a moon's
-# radius by k only requires scaling its parent's mu by k^3 to hold the clock.
-MU_TERN = 3.509193e-04  # Moon (a=0.2000) -> 30d, Tide (a=0.2864) -> 360/7 d ≈ 51.43d
-MU_FULMAIOR = 6.395504e-03  # Eope (a=0.1800) -> 6d, Cenaedo (0.3462) -> 16d, Cteta (0.6156) -> 38d
+# Planetocentric mu is tied to the moon radii below. The radii are real
+# fractions of the heliocentric chart (Moon 0.26% of Tern's orbit, like Earth's
+# at 0.257%), so these mu values are correspondingly tiny. n = sqrt(mu/a^3) is
+# what actually fixes each moon's period, and the radii are free to be honest:
+# scaling a moon's radius by k only requires scaling its parent's mu by k^3 to
+# hold the clock.
+MU_TERN = 7.709696e-10  # Moon (a=0.00260) -> 30d, Tide (a=0.003726) -> 360/7 d ≈ 51.43d
+MU_FULMAIOR = 2.368705e-07  # Eope (a=0.0060) -> 6d, Cenaedo (0.011534) -> 16d, Cteta (0.02054) -> 38d
 MU_BY_PARENT = {"tern": MU_TERN, "fulmaior": MU_FULMAIOR}
 TAU = math.tau
 

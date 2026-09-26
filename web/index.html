@@ -409,7 +409,9 @@ function fitBaseScale(){
   const maxA = bodies.reduce((m, b) => b.a > 0 ? Math.max(m, b.a) : m, 9.9);
   BASE_SCALE = Math.min(W, H) / 2 / (maxA * OVERVIEW_MARGIN);
 }
-const PLANET_DISC_DIV = 18; // outermost ring distance, in planet display radii
+const PLANET_DISC_DIV = 60; // outermost ring distance, in planet display radii
+const MAX_ZOOM = 6000;      // real moon systems are ~0.26% of the helio orbit
+const MIN_RING_PX = 5;       // below this a ring is a speck, not a structure
 const scale = () => BASE_SCALE * view.zoom;
 function frameOrigin(){
   const scene = DRAW_SNAP || SNAP;
@@ -479,7 +481,7 @@ function zoomAt(clientX, clientY, factor){
   const origin = frameOrigin();
   const wx = (mx - CX) / oldScale + view.x + origin.x;
   const wy = (CY - my) / oldScale + view.y + origin.y;
-  view.zoom = Math.max(0.35, Math.min(250, view.zoom * factor));
+  view.zoom = Math.max(0.35, Math.min(MAX_ZOOM, view.zoom * factor));
   const newScale = scale();
   view.x = wx - (mx - CX) / newScale - origin.x;
   view.y = wy - (CY - my) / newScale - origin.y;
@@ -962,7 +964,7 @@ function systemZoomFor(bodyId){
     SNAP.bodies.filter(b => b.parent === body.id).reduce((m, b) => Math.max(m, b.a || 0), 0),
     (SNAP.locations || []).filter(l => l.body === body.id).reduce((m, l) => Math.max(m, l.orbit_a || 0), 0),
     0.001);
-  return Math.max(20, Math.min(250, Math.min(W, H) * 0.38 / (extent * BASE_SCALE)));
+  return Math.max(20, Math.min(MAX_ZOOM, Math.min(W, H) * 0.38 / (extent * BASE_SCALE)));
 }
 function focusLocation(locationId){
   const loc = (SNAP.locations || []).find(l => l.id === locationId);
@@ -1068,17 +1070,27 @@ window.addEventListener("keydown", e => {
 function bodyById(id){ return SNAP.bodies.find(b => b.id === id); }
 function labelFor(id){ return themeName === "elite" ? id.toUpperCase() : id[0].toUpperCase() + id.slice(1); }
 
+function sunDisplayRadius(drawScale){
+  // The star was a fixed 14px disc under a fixed 26px glow at every zoom, so in
+  // the heliocentric view it swallowed the whole inner system — Veluvy orbits
+  // 7px out and Tern 22px, both inside the glow. Scale the star to the
+  // innermost planetary orbit instead, so it can never eclipse what is near it.
+  const radii = SNAP.bodies.filter(b => !b.parent && b.kind === "planet" && b.a > 0)
+    .map(b => b.a * drawScale);
+  const innerPx = radii.length ? Math.min(...radii) : 24;
+  return Math.max(2.5, Math.min(14, innerPx * 0.42));
+}
 function bodyDisplayRadius(body, drawScale){
-  if(body.id === "sun") return 14;
+  if(body.id === "sun") return sunDisplayRadius(drawScale);
   if(body.parent) return 4;
   const childExtent = SNAP.bodies.filter(b => b.parent === body.id)
     .reduce((m, b) => Math.max(m, b.a || 0), 0);
   const locationExtent = (SNAP.locations || []).filter(l => l.body === body.id)
     .reduce((m, l) => Math.max(m, l.orbit_a || 0), 0);
-  // PLANET_DISC_DIV: the outermost ring is ~18 planet-radii out. Real systems
-  // put the first moon far outside the planet (Earth/Moon is ~60 Earth radii),
-  // so a disc proportional to the ring extent made every moon look like a
-  // low orbit. Kept explicit because the ratio IS the scale.
+  // PLANET_DISC_DIV: the outermost ring is ~60 planet-radii out. This is the
+  // real Earth/Moon figure, and it is what leaves room between the disc and
+  // the synchronous shell (5.6 Earth radii out in reality) so an elevator ring
+  // does not sit inside its own planet.
   const extent = Math.max(childExtent, locationExtent);
   return Math.max(3, Math.min(60, extent * drawScale / PLANET_DISC_DIV));
 }
@@ -1177,18 +1189,25 @@ function draw(){
     const kids = SNAP.bodies.filter(b => b.parent === p.id);
     if(!kids.length) continue;
     for(const b of kids){
+      const r = b.a * drawScale;
+      // A real moon system is ~0.26% of the planet's heliocentric orbit, so
+      // from across the system it is genuinely sub-pixel. Drawing it anyway
+      // stacked a bright ring on the planet and made every world look wrong.
+      if(r < MIN_RING_PX) continue;
       ctx.strokeStyle = themeLine(.14);
-      ctx.beginPath(); ctx.arc(px(p.x), py(p.y), b.a * drawScale, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(px(p.x), py(p.y), r, 0, Math.PI * 2); ctx.stroke();
     }
   }
   for(const loc of SNAP.locations || []){
     if(loc.kind === "surface") continue;
     const parent = bodyById(loc.body);
     if(!parent) continue;
+    const r = loc.orbit_a * drawScale;
+    if(r < MIN_RING_PX) continue;
     const parentX = px(parent.x), parentY = py(parent.y);
-    ctx.strokeStyle = themeLine(.18);
-    ctx.setLineDash([2, 4]); ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.arc(parentX, parentY, loc.orbit_a * drawScale, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = loc.synchronous ? themeLine(.24) : themeLine(.18);
+    ctx.setLineDash(loc.synchronous ? [] : [2, 4]); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(parentX, parentY, r, 0, Math.PI * 2); ctx.stroke();
     ctx.setLineDash([]);
     // Location markers are drawn after the parent bodies so surface points
     // remain visible when the camera is inside a planet system.
@@ -1221,10 +1240,14 @@ function draw(){
     const X = px(b.x), Y = py(b.y);
     const r = bodyDisplayRadius(b, drawScale);
     if(b.kind === "wormhole"){ drawGate(b, X, Y, drawScale); hitmap.push({kind:"body", id:b.id, x:X, y:Y, r:20}); continue; }
+    // Moons are sub-pixel from the heliocentric view; hide the body and its
+    // label rather than stacking moons on top of their planet.
+    if(b.parent && view.zoom * b.a * BASE_SCALE < MIN_RING_PX) continue;
     if(b.id === "sun"){
-      const g = ctx.createRadialGradient(X, Y, 1, X, Y, 26);
+      const glow = r * 1.9;
+      const g = ctx.createRadialGradient(X, Y, 1, X, Y, glow);
       g.addColorStop(0, STRAW); g.addColorStop(1, themeLine(0));
-      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(X, Y, 26, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(X, Y, glow, 0, Math.PI * 2); ctx.fill();
     }
     ctx.fillStyle = b.id === "sun" ? STRAW : (b.parent ? (themeName === "elite" ? ROYAL : tint(THEMES[themeName].mut, .85)) : STRAW);
     ctx.beginPath(); ctx.arc(X, Y, r, 0, Math.PI * 2); ctx.fill();
@@ -1339,16 +1362,19 @@ function selectionPanel(){
     const body = bodyById(loc.body);
     const aboard = (SNAP.ships || []).filter(s => s.loc === loc.id);
     const rows = [
-      ["kind", esc(loc.kind)],
+      ["kind", esc(loc.kind) + (loc.synchronous ? ' <span style="color:var(--straw)">· synchronous</span>' : "")],
       ["on", esc(body ? body.name || body.id : loc.body)],
-      loc.kind === "surface" ? null : ["orbit", `${loc.orbit_a.toFixed(3)} · ${loc.orbit_period.toFixed(1)}d`],
+      loc.kind === "surface" ? null : ["orbit r", loc.orbit_a.toExponential(2)],
+      loc.kind === "surface" ? null : ["period", `${loc.orbit_period.toFixed(3)} d`],
       loc.kind === "surface" ? null : ["phase", `${(loc.orbit_angle * 180 / Math.PI % 360).toFixed(0)}°`],
+      loc.synchronous && body ? ["matches rotation", `${(body.rotation_d || 0).toFixed(2)} d`] : null,
       ["climb", `${loc.depart_dv.toFixed(3)} dv`],
       ["descent", `${loc.arrive_dv.toFixed(3)} dv`],
       ["services", loc.service ? "fuel · yard" : "none"],
       ["aboard", aboard.length ? aboard.map(s => shipName(s.id)).join(", ") : "—"],
     ];
     return `<div class="sel-head"><span class="sel-title">${esc(loc.name)}</span><span class="sel-kind">${esc(loc.kind)}</span></div>
+      ${loc.synchronous ? `<div class="sel-note">A tether's counterweight must co-rotate with the ground, so this terminal's period is ${esc(body ? (body.name || body.id) : loc.body)}'s sidereal day exactly.</div>` : ""}
       ${selGrid(rows)}
       <div class="ctl"><button class="hud-button" data-sel-focus-body="${esc(loc.body)}">Select ${esc(loc.body)}</button>
         ${SNAP.ports[loc.body] ? `<button class="hud-button" data-sel-open="port">Market</button>` : ""}
@@ -1368,6 +1394,7 @@ function selectionPanel(){
     parent ? ["orbits", esc(parent.name || parent.id)] : null,
     body.a > 0 ? [parent ? "radius" : "heliocentric", `${body.a.toFixed(4)}`] : null,
     body.a > 0 ? ["period", `${body.period.toFixed(1)} d`] : null,
+    body.rotation_d ? ["sidereal day", `${body.rotation_d.toFixed(2)} d`] : null,
     body.a > 0 ? ["phase", `${(body.angle * 180 / Math.PI % 360).toFixed(0)}°`] : null,
     helio !== null ? ["from sun", helio.toFixed(3)] : null,
     moons.length ? ["moons", moons.map(m => `${esc(m.name || m.id)} ${m.a.toFixed(3)}`).join("<br>")] : null,
