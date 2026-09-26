@@ -124,6 +124,58 @@
   .toast{background:var(--phthalo2); border-left:4px solid var(--straw); padding:8px 12px; box-shadow:0 6px 20px #000b; font-size:12px}
   .diagnostic{position:fixed; right:18px; top:108px; z-index:12; background:rgba(4,12,10,.82); border:1px solid var(--straw-dim); color:var(--straw); padding:8px 10px; font:11px/1.5 monospace; white-space:pre; pointer-events:none}
   [hidden]{display:none !important}
+
+  /* Classic Elite vector-HUD theme */
+  body.elite{
+    --phthalo:#02070B; --phthalo2:#06141B; --straw:#F6B94A; --royal:#39D6E8;
+    --straw-dim:rgba(246,185,74,.42); --straw-faint:rgba(57,214,232,.16);
+    --ink:#D9F6FF; --mut:#6C9AA5;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    background:
+      radial-gradient(ellipse at 50% 45%, rgba(9,42,54,.42), transparent 62%),
+      repeating-linear-gradient(0deg, rgba(57,214,232,.025) 0 1px, transparent 1px 4px),
+      #02070B;
+  }
+  body.elite::before{content:""; position:fixed; inset:0; pointer-events:none; z-index:30;
+    background:repeating-linear-gradient(0deg, rgba(0,0,0,.09) 0 1px, transparent 1px 4px); mix-blend-mode:screen}
+  body.elite header.band{background:#04131A; border-bottom:1px solid var(--royal); padding:12px 22px 10px}
+  body.elite header.band h1{font-size:18px; letter-spacing:4px; color:var(--straw)}
+  body.elite header.band h1 .chev{color:var(--royal); font-size:12px}
+  body.elite .oration{font:12px/1.4 ui-monospace,monospace; color:var(--royal); opacity:.85; letter-spacing:1px}
+  body.elite .toolbar{background:rgba(3,15,21,.72); border-bottom:1px solid rgba(57,214,232,.18)}
+  body.elite .chip{border-radius:0; background:rgba(3,17,23,.8); color:var(--straw); letter-spacing:1px}
+  body.elite .chip.live{background:var(--royal); color:#001015}
+  body.elite .btn{border-radius:0; background:transparent; color:var(--royal); border:1px solid var(--royal);
+    box-shadow:none; padding:8px 12px; font:11px/1 ui-monospace,monospace; letter-spacing:1px}
+  body.elite .btn:hover{background:var(--royal); color:#001015}
+  body.elite .btn:active{transform:none; box-shadow:none}
+  body.elite .btn.ghost{color:var(--straw); border-color:var(--straw-dim)}
+  body.elite .btn.ghost:hover{background:var(--straw); color:#02070B}
+  body.elite .btn.tiny{font-size:10px; padding:4px 6px}
+  body.elite main{gap:10px}
+  body.elite .card{background:rgba(3,15,21,.92); border:1px solid rgba(57,214,232,.38); border-top:2px solid var(--royal);
+    border-radius:0; box-shadow:0 0 0 1px rgba(0,0,0,.5), 0 0 18px rgba(0,0,0,.35); padding-bottom:10px}
+  body.elite .pill{border-radius:0; background:var(--royal); color:#001015; letter-spacing:2px; font-size:10px; padding:4px 10px}
+  body.elite .pill::after{background:var(--straw); width:8px; height:8px}
+  body.elite .card .body{padding-left:12px; padding-right:12px}
+  body.elite canvas#sys{background:#010508; border:1px solid rgba(57,214,232,.22)}
+  body.elite table.book{border-collapse:collapse}
+  body.elite table.book th{color:var(--royal); letter-spacing:1px}
+  body.elite table.book td,body.elite table.book th{border-bottom-color:rgba(57,214,232,.14)}
+  body.elite .bid{color:#7fe6a6}.elite .ask,body.elite .ask{color:var(--straw)}
+  body.elite .bar{background:rgba(57,214,232,.12); border-radius:0}
+  body.elite .bar > i{background:var(--royal)}
+  body.elite .badge{border-radius:0; clip-path:none; background:var(--straw); color:#02070B}
+  body.elite .badge.royal{background:var(--royal); color:#001015}
+  body.elite .badge.ghostb{background:transparent; color:var(--straw); border-color:var(--straw-dim)}
+  body.elite select,body.elite input{background:#031017; color:var(--straw); border-color:rgba(57,214,232,.4); border-radius:0}
+  body.elite .preview{background:rgba(57,214,232,.08); border-left-color:var(--royal); color:var(--straw)}
+  body.elite .toast{background:#031017; border-left-color:var(--straw); color:var(--ink)}
+  body.elite .palette-box{background:#031017; border-color:var(--royal); border-radius:0}
+  body.elite .palette-item.active{background:var(--royal); color:#001015}
+  body.elite .filterbar{border-bottom:1px solid rgba(57,214,232,.2); padding-bottom:6px}
+  body.elite .ops-row{border-bottom-color:rgba(57,214,232,.14)}
+  body.elite .foot{color:var(--royal); letter-spacing:1px}
 </style>
 </head>
 <body>
@@ -140,6 +192,7 @@
   <button class="btn ghost" id="export">Export</button>
   <button class="btn ghost" id="diagnostics">Diagnostics</button>
   <button class="btn ghost" id="help">?</button>
+  <button class="btn ghost" id="theme-toggle">Theme: Elite</button>
   <button class="btn ghost" id="reload">Reload snapshot.json</button>
   <label class="btn ghost" for="file">Load snapshot file…</label>
   <input type="file" id="file" accept=".json,application/json">
@@ -226,7 +279,13 @@ let SNAP = null, LIVE = false, PREVIEW = "", QUOTE = "", AUTO_ENABLED = false;
 const sel = { body: "tide", ship: "pc1", port: "tide", location: null };
 const view = { x: 0, y: 0, zoom: 1 };
 let frameMode = "inertial";
-const STRAW = "#F2E6A6", ROYAL = "#6B3FA0";
+const THEME_KEY = "sol-merchant-theme";
+const THEMES = {
+  elite: {straw:"#F6B94A", royal:"#39D6E8", ink:"#D9F6FF", mut:"#6C9AA5", accent:"#39D6E8"},
+  greenhouse: {straw:"#F2E6A6", royal:"#6B3FA0", ink:"#EDE7C8", mut:"#9AA48F", accent:"#F2E6A6"},
+};
+let themeName = (() => { try { return localStorage.getItem(THEME_KEY) || "elite"; } catch(e){ return "elite"; } })();
+let STRAW = THEMES[themeName].straw, ROYAL = THEMES[themeName].royal;
 const cv = document.getElementById("sys"), ctx = cv.getContext("2d");
 const W = cv.width, H = cv.height, CX = W / 2, CY = H / 2;
 const BASE_SCALE = Math.min(W, H) / 2 / 9.9; // MUD-literal radii: Fulmaior rides at 9.43
@@ -259,6 +318,21 @@ function saveLocalSet(name, set){
 }
 const BOOKMARKS = localSet("sol-merchant-bookmarks");
 const WATCHLIST = localSet("sol-merchant-watchlist");
+function tint(hex, alpha){
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
+function themeLine(alpha){ return tint(themeName === "elite" ? THEMES.elite.royal : THEMES.greenhouse.straw, alpha); }
+function applyTheme(name){
+  themeName = THEMES[name] ? name : "elite";
+  STRAW = THEMES[themeName].straw; ROYAL = THEMES[themeName].royal;
+  document.body.classList.toggle("elite", themeName === "elite");
+  document.body.classList.toggle("greenhouse", themeName === "greenhouse");
+  try { localStorage.setItem(THEME_KEY, themeName); } catch(e){}
+  const button = document.getElementById("theme-toggle");
+  if(button) button.textContent = themeName === "elite" ? "Theme: Elite" : "Theme: Greenhouse";
+  if(typeof draw === "function" && SNAP) draw();
+}
 
 function updateViewChip(){
   const chip = document.getElementById("chip-view");
@@ -551,6 +625,7 @@ document.getElementById("auto").onclick = () => setAuto(!AUTO_ENABLED);
 document.getElementById("export").onclick = downloadSnapshot;
 document.getElementById("diagnostics").onclick = toggleDiagnostics;
 document.getElementById("help").onclick = openPalette;
+document.getElementById("theme-toggle").onclick = () => applyTheme(themeName === "elite" ? "greenhouse" : "elite");
 document.getElementById("command-input").oninput = () => { commandIndex = 0; renderCommands(); };
 document.getElementById("command-input").onkeydown = e => {
   if(e.key === "Enter"){ e.preventDefault(); runPaletteCommand(); }
@@ -733,6 +808,7 @@ window.addEventListener("keydown", e => {
 });
 
 function bodyById(id){ return SNAP.bodies.find(b => b.id === id); }
+function labelFor(id){ return themeName === "elite" ? id.toUpperCase() : id[0].toUpperCase() + id.slice(1); }
 
 function bodyDisplayRadius(body, drawScale){
   if(body.id === "sun") return 14;
@@ -751,7 +827,7 @@ function drawLocationMarkers(){
     const X = px(loc.x), Y = py(loc.y);
     const markerR = Math.max(3, Math.min(10,
       (loc.kind === "station" ? 3.5 : loc.kind === "terminal" ? 3 : 2.2) * Math.sqrt(view.zoom)));
-    ctx.fillStyle = loc.kind === "station" ? STRAW : loc.kind === "terminal" ? ROYAL : "#cdbf85";
+    ctx.fillStyle = loc.kind === "station" ? STRAW : loc.kind === "terminal" ? ROYAL : tint(THEMES[themeName].mut, .85);
     ctx.beginPath();
     if(loc.kind === "station") ctx.rect(X - markerR, Y - markerR, markerR * 2, markerR * 2);
     else if(loc.kind === "terminal"){
@@ -764,13 +840,27 @@ function drawLocationMarkers(){
       ctx.beginPath(); ctx.arc(X, Y, markerR + 5, 0, Math.PI * 2); ctx.stroke();
     }
     if(view.zoom >= 3 || selected){
-      ctx.fillStyle = "rgba(237,231,200,.9)"; ctx.font = "10px sans-serif"; ctx.textAlign = "left";
-      ctx.fillText(loc.name, X + markerR + 4, Y + 3);
+      ctx.fillStyle = tint(THEMES[themeName].ink, .9); ctx.font = "10px sans-serif"; ctx.textAlign = "left";
+      ctx.fillText(themeName === "elite" ? loc.name.toUpperCase() : loc.name, X + markerR + 4, Y + 3);
     }
     hitmap.push({kind:"location", id:loc.id, x:X, y:Y, r:Math.max(12, markerR + 6)});
   }
 }
 
+function drawBackdrop(){
+  if(themeName !== "elite") return;
+  ctx.strokeStyle = themeLine(.08); ctx.lineWidth = 1;
+  for(let x = 0; x <= W; x += 60){ ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+  for(let y = 0; y <= H; y += 60){ ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  ctx.fillStyle = tint(THEMES.elite.ink, .55);
+  for(let i = 0; i < 150; i++){
+    const x = (i * 137.508) % W, y = (i * 61.803) % H;
+    const r = i % 11 === 0 ? 1.4 : .7;
+    ctx.globalAlpha = .25 + (i % 5) * .12;
+    ctx.fillRect(x, y, r, r);
+  }
+  ctx.globalAlpha = 1;
+}
 function draw(){
   const authoritative = SNAP;
   if(DRAW_SNAP) SNAP = DRAW_SNAP;
@@ -782,8 +872,9 @@ function draw(){
     SNAP = authoritative;
     return;
   }
+  drawBackdrop();
   const drawScale = scale(), sunX = px(0), sunY = py(0);
-  ctx.strokeStyle = "rgba(242,230,166,.22)"; ctx.lineWidth = 1;
+  ctx.strokeStyle = themeLine(.22); ctx.lineWidth = 1;
   for(const b of SNAP.bodies){
     if(b.parent) continue;
     if((b.a || 0) <= 0) continue;
@@ -794,7 +885,7 @@ function draw(){
     const kids = SNAP.bodies.filter(b => b.parent === p.id);
     if(!kids.length) continue;
     for(const b of kids){
-      ctx.strokeStyle = "rgba(242,230,166,.14)";
+      ctx.strokeStyle = themeLine(.14);
       ctx.beginPath(); ctx.arc(px(p.x), py(p.y), b.a * drawScale, 0, Math.PI * 2); ctx.stroke();
     }
   }
@@ -803,7 +894,7 @@ function draw(){
     const parent = bodyById(loc.body);
     if(!parent) continue;
     const parentX = px(parent.x), parentY = py(parent.y);
-    ctx.strokeStyle = "rgba(242,230,166,.18)";
+    ctx.strokeStyle = themeLine(.18);
     ctx.setLineDash([2, 4]); ctx.lineWidth = 1;
     ctx.beginPath(); ctx.arc(parentX, parentY, loc.orbit_a * drawScale, 0, Math.PI * 2); ctx.stroke();
     ctx.setLineDash([]);
@@ -821,7 +912,7 @@ function draw(){
   }
   for(const s of SNAP.ships){
     if(!s.leg || !s.arc_pts.length) continue;
-    ctx.strokeStyle = "rgba(242,230,166,.55)"; ctx.setLineDash([5, 4]); ctx.lineWidth = 1.4;
+    ctx.strokeStyle = themeLine(.55); ctx.setLineDash([5, 4]); ctx.lineWidth = 1.4;
     ctx.beginPath();
     s.arc_pts.forEach((p, i) => { const X = px(p[0]), Y = py(p[1]); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
     ctx.stroke(); ctx.setLineDash([]);
@@ -830,7 +921,7 @@ function draw(){
     if(!s.leg || s.arc_pts.length) continue;
     const a = bodyById(s.leg.from), b = bodyById(s.leg.to);
     if(!a || !b) continue;
-    ctx.strokeStyle = "rgba(107,63,160,.9)"; ctx.setLineDash([2, 3]); ctx.lineWidth = 1.2;
+    ctx.strokeStyle = ROYAL; ctx.setLineDash([2, 3]); ctx.lineWidth = 1.2;
     ctx.beginPath(); ctx.moveTo(px(a.x), py(a.y)); ctx.lineTo(px(b.x), py(b.y)); ctx.stroke();
     ctx.setLineDash([]);
   }
@@ -839,17 +930,17 @@ function draw(){
     const r = bodyDisplayRadius(b, drawScale);
     if(b.id === "sun"){
       const g = ctx.createRadialGradient(X, Y, 1, X, Y, 26);
-      g.addColorStop(0, STRAW); g.addColorStop(1, "rgba(242,230,166,0)");
+      g.addColorStop(0, STRAW); g.addColorStop(1, themeLine(0));
       ctx.fillStyle = g; ctx.beginPath(); ctx.arc(X, Y, 26, 0, Math.PI * 2); ctx.fill();
     }
-    ctx.fillStyle = b.id === "sun" ? STRAW : (b.parent ? "#cdbf85" : STRAW);
+    ctx.fillStyle = b.id === "sun" ? STRAW : (b.parent ? (themeName === "elite" ? ROYAL : tint(THEMES[themeName].mut, .85)) : STRAW);
     ctx.beginPath(); ctx.arc(X, Y, r, 0, Math.PI * 2); ctx.fill();
     if(sel.body === b.id || sel.port === b.id){
       ctx.strokeStyle = ROYAL; ctx.lineWidth = 2.5;
       ctx.beginPath(); ctx.arc(X, Y, r + 5, 0, Math.PI * 2); ctx.stroke();
     }
-    ctx.fillStyle = "rgba(237,231,200,.85)"; ctx.font = "11px sans-serif"; ctx.textAlign = "left";
-    ctx.fillText(b.id === "sun" ? "Sun" : b.id[0].toUpperCase() + b.id.slice(1), X + r + 4, Y + 4);
+    ctx.fillStyle = tint(THEMES[themeName].ink, .85); ctx.font = "11px sans-serif"; ctx.textAlign = "left";
+    ctx.fillText(labelFor(b.id), X + r + 4, Y + 4);
     hitmap.push({kind:"body", id:b.id, x:X, y:Y, r:Math.max(12, r + 6)});
   }
   drawLocationMarkers();
@@ -870,7 +961,7 @@ function draw(){
     hitmap.push({kind:"ship", id:s.id, x:X, y:Y, r:12});
   }
   const frame = frameOrigin();
-  ctx.fillStyle = "rgba(242,230,166,.78)"; ctx.font = "bold 10px sans-serif"; ctx.textAlign = "left";
+  ctx.fillStyle = themeLine(.78); ctx.font = "bold 10px sans-serif"; ctx.textAlign = "left";
   ctx.fillText(`FRAME · ${frame.label.toUpperCase()}`, 12, H - 14);
   updateViewChip();
   SNAP = authoritative;
@@ -1162,6 +1253,7 @@ function render(){
     button.onclick = () => focusLocation(button.dataset.focusLocation);
   });
 }
+applyTheme(themeName);
 boot(false);
 </script>
 </body>
