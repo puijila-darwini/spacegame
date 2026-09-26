@@ -190,9 +190,70 @@
   body.elite .drawer-head{color:var(--royal); border-color:var(--royal)}
   body.elite .hud-button{border-radius:0; color:var(--royal); border-color:var(--royal); background:transparent}
   body.elite .hud-button:hover{background:var(--royal); color:#001015}
+  .title-screen{position:fixed; inset:0; z-index:40; display:grid; place-items:center; overflow:auto;
+    background:radial-gradient(ellipse at 50% 35%, rgba(9,42,54,.62), transparent 62%), #02070B; color:var(--ink)}
+  .title-screen[hidden]{display:none !important}
+  .title-box{width:min(680px,92vw); margin:5vh auto; padding:26px 30px; border:1px solid var(--royal); background:rgba(3,16,23,.94); box-shadow:0 0 0 1px rgba(0,0,0,.6), 0 0 40px rgba(0,0,0,.55)}
+  .title-kicker{color:var(--royal); letter-spacing:4px; font-size:11px; margin-bottom:8px}
+  .title-box h1{margin:0; color:var(--straw); font:700 32px/1.1 ui-monospace,monospace; letter-spacing:6px}
+  .title-box .title-sub{color:var(--mut); margin:8px 0 22px; font:12px ui-monospace,monospace}
+  .title-menu{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px}
+  .title-btn{padding:12px 14px; border:1px solid var(--royal); background:transparent; color:var(--royal); text-align:left; cursor:pointer; font:700 12px ui-monospace,monospace; letter-spacing:2px}
+  .title-btn:hover{background:var(--royal); color:#001015}
+  .title-btn.primary{grid-column:1/-1; border-color:var(--straw); color:var(--straw)}
+  .title-btn.primary:hover{background:var(--straw); color:#02070B}
+  .title-panel{margin-top:18px; border-top:1px solid var(--straw-dim); padding-top:16px}
+  .title-panel[hidden]{display:none !important}
+  .title-panel h2{margin:0 0 12px; color:var(--straw); font:700 15px ui-monospace,monospace; letter-spacing:2px}
+  .title-field{display:grid; grid-template-columns:130px 1fr; gap:10px; align-items:center; margin:8px 0}
+  .title-field input,.title-field select{width:100%; max-width:none}
+  .title-actions{display:flex; gap:8px; margin-top:14px; flex-wrap:wrap}
+  .title-slot{display:flex; justify-content:space-between; gap:10px; align-items:center; padding:9px; border:1px solid var(--straw-dim); margin:6px 0; color:var(--straw)}
+  .title-slot small{color:var(--mut)}
+  .title-status{margin-top:14px; color:var(--mut); font:11px ui-monospace,monospace; min-height:16px}
+  @media (max-width:560px){.title-box{padding:20px 16px}.title-box h1{font-size:24px;letter-spacing:3px}.title-menu{grid-template-columns:1fr}.title-btn.primary{grid-column:auto}.title-field{grid-template-columns:1fr;gap:3px}}
+  body.elite .title-box{background:rgba(2,10,15,.96); border-color:var(--royal)}
+  body.elite .title-btn{border-radius:0}
 </style>
 </head>
 <body>
+<div class="title-screen" id="title-screen">
+  <div class="title-box">
+    <div class="title-kicker">TRADER OPERATIONS // SOL SYSTEM</div>
+    <h1>SOL MERCHANT</h1>
+    <p class="title-sub">A slow game of capital, distance, and consequence.</p>
+    <div class="title-menu">
+      <button class="title-btn primary" id="title-continue">CONTINUE CAMPAIGN</button>
+      <button class="title-btn" id="title-new">NEW GAME</button>
+      <button class="title-btn" id="title-load">LOAD GAME</button>
+      <button class="title-btn" id="title-save">SAVE GAME</button>
+      <button class="title-btn" id="title-settings">SETTINGS</button>
+    </div>
+    <div class="title-panel" id="title-new-panel" hidden>
+      <h2>NEW CAMPAIGN</h2>
+      <div class="title-field"><label for="new-captain">Captain name</label><input id="new-captain" value="Commander" maxlength="32"></div>
+      <div class="title-field"><label for="new-campaign">Campaign</label><input id="new-campaign" value="Sol Merchant" maxlength="40"></div>
+      <div class="title-field"><label for="new-difficulty">Difficulty</label><select id="new-difficulty"><option value="story">Story · relaxed</option><option value="balanced" selected>Balanced · trader</option><option value="hard">Hard · unforgiving</option></select></div>
+      <div class="title-actions"><button class="title-btn" id="new-start">START CAMPAIGN</button><button class="title-btn" id="new-back">BACK</button></div>
+    </div>
+    <div class="title-panel" id="title-load-panel" hidden>
+      <h2>LOAD CAMPAIGN</h2><div id="load-slots"></div>
+      <div class="title-actions"><button class="title-btn" id="load-back">BACK</button></div>
+    </div>
+    <div class="title-panel" id="title-save-panel" hidden>
+      <h2>SAVE CAMPAIGN</h2>
+      <div class="title-field"><label for="save-slot">Slot name</label><input id="save-slot" value="campaign-1" maxlength="32"></div>
+      <div class="title-actions"><button class="title-btn" id="save-confirm">SAVE CAMPAIGN</button><button class="title-btn" id="save-back">BACK</button></div>
+    </div>
+    <div class="title-panel" id="title-settings-panel" hidden>
+      <h2>SETTINGS</h2>
+      <div class="title-field"><label for="title-theme">Visual theme</label><select id="title-theme"><option value="elite">Classic Elite</option><option value="greenhouse">Greenhouse</option></select></div>
+      <div class="tape">Settings are kept separate from the campaign so the galaxy opens cleanly.</div>
+      <div class="title-actions"><button class="title-btn" id="title-settings-back">BACK</button></div>
+    </div>
+    <div class="title-status" id="title-status">Ready.</div>
+  </div>
+</div>
 <header class="band">
   <h1><span class="chev">◆◆</span> SOL MERCHANT <span class="chev">◆◆</span></h1>
   <p class="oration">Put capital somewhere in the galaxy — wait weeks — find out what happened.</p>
@@ -568,6 +629,82 @@ async function setAuto(enabled){
     status(result.enabled ? "auto time on · 1 day/min" : "auto time paused");
   }
 }
+function titleStatus(message){ document.getElementById("title-status").textContent = message; }
+function showTitlePanel(id){
+  for(const panel of ["new", "load", "save", "settings"]) document.getElementById(`title-${panel}-panel`).hidden = panel !== id;
+}
+function hideTitlePanels(){ showTitlePanel(null); }
+async function titleRequest(action, payload){
+  const r = await fetch(`/api/${action}`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload || {})});
+  const j = await r.json();
+  if(!j.ok) throw new Error(j.error || "request failed");
+  return j.result;
+}
+function enterGame(){
+  document.getElementById("title-screen").hidden = true;
+  if(!LIVE){ LIVE = true; setLiveUI(); applyGameChrome(); poll(); }
+  boot(false);
+}
+async function continueGame(){
+  try { titleStatus("Opening current campaign…"); enterGame(); }
+  catch(e){ titleStatus("Could not open the campaign: " + e.message); }
+}
+async function startNewGame(){
+  try {
+    titleStatus("Creating campaign…");
+    await titleRequest("new", {captain:document.getElementById("new-captain").value.trim() || "Commander",
+      campaign:document.getElementById("new-campaign").value.trim() || "Sol Merchant",
+      difficulty:document.getElementById("new-difficulty").value});
+    enterGame();
+  } catch(e){ titleStatus("New campaign failed: " + e.message); }
+}
+async function loadCampaign(slot){
+  try { titleStatus(`Loading ${slot}…`); await titleRequest("load", {slot}); enterGame(); }
+  catch(e){ titleStatus("Load failed: " + e.message); }
+}
+async function saveCampaign(){
+  try {
+    const slot = document.getElementById("save-slot").value.trim() || "campaign-1";
+    await titleRequest("save", {slot});
+    titleStatus(`Saved to ${slot}.`);
+  } catch(e){ titleStatus("Save failed: " + e.message); }
+}
+async function quickSave(){
+  try { await titleRequest("save", {slot:"quicksave"}); toast("Campaign saved to quicksave"); }
+  catch(e){ toast("Save failed: " + e.message); }
+}
+function openLoadScreen(){
+  document.getElementById("title-screen").hidden = false;
+  showTitlePanel("load"); showLoadSlots();
+}
+async function showLoadSlots(){
+  try {
+    const r = await fetch("/api/saves", {cache:"no-store"});
+    const j = await r.json();
+    const saves = j.saves || [];
+    document.getElementById("load-slots").innerHTML = saves.map(s =>
+      `<div class="title-slot"><span><b>${esc(s.label)}</b><br><small>${esc(s.captain)} · ${esc(s.difficulty)} · t=${Number(s.t).toFixed(1)}d</small></span><button class="title-btn" data-title-load="${esc(s.slot)}">LOAD</button></div>`).join("") ||
+      "<div class='dim'>No named saves yet.</div>";
+    document.querySelectorAll("[data-title-load]").forEach(b => b.onclick = () => loadCampaign(b.dataset.titleLoad));
+  } catch(e){ titleStatus("Could not read saves: " + e.message); }
+}
+function initTitle(){
+  document.getElementById("title-screen").hidden = false;
+  document.getElementById("title-theme").value = themeName;
+  titleStatus("Ready.");
+  document.getElementById("title-continue").onclick = continueGame;
+  document.getElementById("title-new").onclick = () => showTitlePanel("new");
+  document.getElementById("title-load").onclick = () => { showTitlePanel("load"); showLoadSlots(); };
+  document.getElementById("title-save").onclick = () => showTitlePanel("save");
+  document.getElementById("title-settings").onclick = () => showTitlePanel("settings");
+  document.getElementById("new-start").onclick = startNewGame;
+  document.getElementById("new-back").onclick = hideTitlePanels;
+  document.getElementById("load-back").onclick = hideTitlePanels;
+  document.getElementById("save-confirm").onclick = saveCampaign;
+  document.getElementById("save-back").onclick = hideTitlePanels;
+  document.getElementById("title-theme").onchange = e => applyTheme(e.target.value);
+  document.getElementById("title-settings-back").onclick = hideTitlePanels;
+}
 function commandItems(){
   const items = [
     {label:"Focus selected world system", hint:"F", run:enterSystemView},
@@ -699,6 +836,7 @@ window.addEventListener("drop", e => { e.preventDefault(); if(e.dataTransfer.fil
 function loadFile(f){
   const rd = new FileReader();
   rd.onload = () => {
+    document.getElementById("title-screen").hidden = true;
     LIVE = false;
     document.getElementById("chip-mode").textContent = "file mode";
     document.getElementById("chip-mode").classList.remove("live");
@@ -1066,6 +1204,7 @@ function settingsPanel(){
       <button class="hud-button" id="settings-diagnostics">Diagnostics</button><button class="hud-button" id="settings-export">Export snapshot</button></div>
     <div class="rowline"><span>Reference frame</span><select id="settings-frame"><option value="inertial">Heliocentric</option><option value="follow">Follow selected world</option></select></div>
     <div class="rowline"><span>Jump to world</span><select id="settings-jump">${bodyOptions(sel.body)}</select></div>
+    <div class="ctl"><button class="hud-button" id="settings-save">Save campaign</button><button class="hud-button" id="settings-load">Load campaign</button></div>
     <div class="ctl"><button class="hud-button" id="settings-reset">Reset campaign</button><label class="hud-button" for="file">Load snapshot</label></div>`;
 }
 function guidePanel(){
@@ -1354,6 +1493,10 @@ function render(){
   if(settingsDiag) settingsDiag.onclick = toggleDiagnostics;
   const settingsExport = document.getElementById("settings-export");
   if(settingsExport) settingsExport.onclick = downloadSnapshot;
+  const settingsSave = document.getElementById("settings-save");
+  if(settingsSave) settingsSave.onclick = quickSave;
+  const settingsLoad = document.getElementById("settings-load");
+  if(settingsLoad) settingsLoad.onclick = () => { closeDrawer(); openLoadScreen(); };
   const settingsFrame = document.getElementById("settings-frame");
   if(settingsFrame){ settingsFrame.value = frameMode; settingsFrame.onchange = e => setFrameMode(e.target.value); }
   const settingsJump = document.getElementById("settings-jump");
@@ -1391,7 +1534,7 @@ function render(){
   });
 }
 applyTheme(themeName);
-boot(false);
+initTitle();
 </script>
 </body>
 </html>

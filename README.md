@@ -16,9 +16,11 @@ Then open <http://192.168.1.38:8765/> from another device on the LAN, or <http:/
 
 The server exposes a JSON API under `/api/` and saves the campaign to `~/ai/tmp/spacegame/live.json` by default. Set `SPACEGAME_SAVE` to change the save path, `SPACEGAME_HOST` to change the bind address, or `SPACEGAME_AUTO=1` to advance one game day per real minute.
 
+The game opens on a title screen with `Continue`, `New Game`, `Load Game`, `Save Game`, and `Settings`. New campaigns collect a captain name, campaign name, and difficulty; saves are real named slots with metadata and offline-safe campaign state.
+
 ## Interface controls
 
-The system view is a camera-based canvas:
+Once a campaign is opened, the game view is a camera-based canvas:
 
 - drag to pan;
 - use the wheel or a pinch gesture to zoom around the pointer;

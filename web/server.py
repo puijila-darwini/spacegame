@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -27,19 +28,24 @@ from sim.state import build_sol  # noqa: E402
 SAVE = os.environ.get("SPACEGAME_SAVE", "/home/pthag/ai/tmp/spacegame/live.json")
 
 
-def fresh_game():
+def fresh_game(captain: str = "Commander", difficulty: str = "balanced",
+               campaign: str = "Sol Merchant"):
     g = build_sol()
     markets.seed(g)
     contacts.seed(g)
     infra.seed(g)
+    g.captain = captain or "Commander"
+    g.difficulty = difficulty or "balanced"
+    g.campaign = campaign or "Sol Merchant"
     return g
 
 
 class Store:
     """The one live game. All mutations hold the lock and then save."""
 
-    def __init__(self, path: str = SAVE):
+    def __init__(self, path: str = SAVE, slots: str | None = None):
         self.path = path
+        self.slot_dir = slots or os.path.join(os.path.dirname(path) or ".", "slots")
         self.lock = threading.Lock()
         self.auto_enabled = os.environ.get("SPACEGAME_AUTO") == "1"
         try:
@@ -52,6 +58,57 @@ class Store:
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
         persist.save(self.game, self.path)
 
+    @staticmethod
+    def _valid_slot(slot: str) -> str:
+        slot = str(slot or "quicksave").strip().lower()
+        if not re.fullmatch(r"[a-z0-9_-]{1,32}", slot):
+            raise ValueError("slot must be 1-32 letters, numbers, _ or -")
+        return slot
+
+    def _slot_path(self, slot: str) -> str:
+        return os.path.join(self.slot_dir, f"slot-{self._valid_slot(slot)}.json")
+
+    @staticmethod
+    def _save_meta(data: dict, slot: str, label: str) -> dict:
+        meta = data.get("meta", {})
+        ship = (data.get("ships") or [{}])[0]
+        return {"slot": slot, "label": label, "t": data.get("t", 0),
+                "credits": data.get("credits", 0), "captain": meta.get("captain", "Commander"),
+                "difficulty": meta.get("difficulty", "balanced"),
+                "campaign": meta.get("campaign", "Sol Merchant"),
+                "ship": ship.get("name", "PC-1")}
+
+    def list_saves(self) -> list:
+        saves = [self._save_meta(persist.to_dict(self.game), "autosave", "Current campaign")]
+        try:
+            names = sorted(os.listdir(self.slot_dir))
+        except FileNotFoundError:
+            names = []
+        for name in names:
+            if not (name.startswith("slot-") and name.endswith(".json")):
+                continue
+            try:
+                with open(os.path.join(self.slot_dir, name)) as f:
+                    data = json.load(f)
+                slot = name[5:-5]
+                saves.append(self._save_meta(data, slot, slot.replace("_", " ").title()))
+            except (OSError, ValueError, KeyError):
+                continue
+        return saves
+
+    def save_slot(self, slot: str, label: str = "") -> dict:
+        path = self._slot_path(slot)
+        os.makedirs(self.slot_dir, exist_ok=True)
+        persist.save(self.game, path)
+        return self._save_meta(persist.to_dict(self.game), self._valid_slot(slot),
+                               label or self._valid_slot(slot).replace("_", " ").title())
+
+    def load_slot(self, slot: str) -> dict:
+        path = self._slot_path(slot)
+        self.game = persist.load(path)
+        self._save()
+        return {"slot": self._valid_slot(slot), "snapshot_t": self.game.t}
+
     def snapshot(self) -> dict:
         with self.lock:
             return api.snapshot(self.game)
@@ -59,6 +116,19 @@ class Store:
     def act(self, name: str, p: dict):
         with self.lock:
             g = self.game
+            if name == "saves":
+                return {"saves": self.list_saves()}
+            if name == "save":
+                return self.save_slot(p.get("slot", "quicksave"), p.get("label", ""))
+            if name == "load":
+                return self.load_slot(p.get("slot", ""))
+            if name == "new":
+                self.game = fresh_game(p.get("captain", "Commander"),
+                                       p.get("difficulty", "balanced"),
+                                       p.get("campaign", "Sol Merchant"))
+                self._save()
+                return {"new": True, "captain": self.game.captain,
+                        "difficulty": self.game.difficulty, "campaign": self.game.campaign}
             if name == "advance":
                 days = float(p.get("days", 1))
                 if days <= 0 or days > 3650:
@@ -143,6 +213,12 @@ class Handler(BaseHTTPRequestHandler):
             assert self.store is not None
             self._send(200, {"enabled": self.store.auto_enabled,
                              "interval_s": 60, "days": 1})
+            return
+        if path == "/api/saves":
+            assert self.store is not None
+            with self.store.lock:
+                saves = self.store.list_saves()
+            self._send(200, {"saves": saves})
             return
         if path == "/":
             path = "/index.html"

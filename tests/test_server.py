@@ -106,6 +106,23 @@ def test_auto_toggle():
     assert code == 200 and body["result"]["enabled"] is False
 
 
+def test_save_slots_and_new_game():
+    code, body = call("GET", "/api/saves")
+    assert code == 200 and any(s["slot"] == "autosave" for s in body["saves"])
+    code, body = call("POST", "/api/save", {"slot": "test_slot", "label": "Test Slot"})
+    assert code == 200 and body["result"]["slot"] == "test_slot"
+    code, body = call("GET", "/api/saves")
+    assert any(s["slot"] == "test_slot" and s["label"] == "Test Slot" for s in body["saves"])
+    code, body = call("POST", "/api/new", {"captain": "Test Captain", "difficulty": "hard"})
+    assert code == 200 and body["result"]["captain"] == "Test Captain"
+    code, body = call("POST", "/api/save", {"slot": "captain_slot"})
+    assert code == 200
+    code, body = call("GET", "/api/saves")
+    assert any(s["slot"] == "captain_slot" and s["captain"] == "Test Captain" for s in body["saves"])
+    code, body = call("POST", "/api/load", {"slot": "test_slot"})
+    assert code == 200 and body["ok"]
+
+
 if __name__ == "__main__":
     tmp = tempfile.mkdtemp(prefix="spacegame-live-")
     srv = live.make_server(0, os.path.join(tmp, "live.json"))
@@ -121,6 +138,7 @@ if __name__ == "__main__":
         ("contract_lapse", test_contract_lapse_over_wire),
         ("reset", test_reset),
         ("auto_toggle", test_auto_toggle),
+        ("save_slots_new_game", test_save_slots_and_new_game),
     ]
     ok = all(check(n, f) for n, f in tests)
     print(f"\n{len(PASS)}/{len(tests)} passed")

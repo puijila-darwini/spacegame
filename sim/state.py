@@ -57,6 +57,9 @@ class Game:
     contracts: dict = field(default_factory=dict)  # {cid: contract}
     contract_seq: int = 0
     locations: dict = field(default_factory=dict)  # {loc_id: location}; empty until infra.seed()
+    captain: str = "Commander"  # campaign identity, set by NEW GAME
+    difficulty: str = "balanced"  # campaign difficulty label
+    campaign: str = "Sol Merchant"
 
 
 def build_sol() -> Game:

@@ -33,7 +33,9 @@ def to_dict(game: Game) -> dict:
             "ledger": list(game.ledger), "credits": game.credits,
             "markets": game.markets, "contacts": game.contacts,
             "known": game.known, "contracts": game.contracts,
-            "contract_seq": game.contract_seq, "locations": game.locations}
+            "contract_seq": game.contract_seq, "locations": game.locations,
+            "meta": {"captain": game.captain, "difficulty": game.difficulty,
+                     "campaign": game.campaign}}
 
 
 def from_dict(data: dict) -> Game:
@@ -62,6 +64,10 @@ def from_dict(data: dict) -> Game:
     game.contracts = data.get("contracts", {})
     game.contract_seq = data.get("contract_seq", 0)
     game.locations = data.get("locations", {})
+    meta = data.get("meta", {})
+    game.captain = meta.get("captain", "Commander")
+    game.difficulty = meta.get("difficulty", "balanced")
+    game.campaign = meta.get("campaign", "Sol Merchant")
     return game
 
 
