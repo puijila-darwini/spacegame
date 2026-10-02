@@ -102,6 +102,61 @@ fixture data only — `state.build_alpha_phocae()` (hot inner world, temperate
 middle, cold outer, one moon) so the shape of a second system is already
 decided. Wiring the crossing is the next step, not this one.
 
+### Reading the canvas
+
+**What have I selected** is the top card in the right rail and the primary
+readout: click a world, a ship, or an orbital location and it reports that
+thing. `sel.focus` records *what was pointed at* — separate from
+`sel.body`/`sel.ship`/`sel.location`, which are the derived camera and panel
+context. Without it, clicking a ship parked at Tern is indistinguishable from
+clicking Tern itself.
+
+**Labels** all go through one placement pass (`placeLabels`/`drawLabels`) and
+therefore share a single collision space. Candidates are sorted by priority
+(selection > ship > planet > moon > gate > location); each takes the first slot
+that clears every already-placed box *and* every marker anchor on the map, and is
+dropped entirely when nothing fits. Before this each subsystem drew its own text
+at a fixed 10–11px, which put an 11px label on a 4px planet and stacked four
+labels on the same point in Tern's system.
+
+Three rules keep type in scale:
+
+- **Font scales with its subject** — `labelFontPx` is `disc × 1.9` clamped to
+  8–12px. A 3213× system view puts a planet 4px across; a fixed 11px label was
+  nearly three times the size of the thing it named.
+- **Halo is dark and proportional** (`lineWidth = font × 0.16`, theme `bg`).
+  Its job is separating text from orbit rings. Stroking it in the *ink* colour
+  bloomed the glyph counters and made labels unreadable.
+- **Short names** — "Tern Elevator Crown" (114px) is drawn as `CROWN`;
+  `shortLocName` takes the tail word. Surfaces get no label at all: they are
+  body-anchored, so their label always landed underneath their planet's own.
+
+Markers scale logarithmically and stay smaller than the world they mark: station
+3.3px, terminal 2.8px, against a 4.3px planet disc at Tern's fitted zoom. They
+used to be `3.5·√zoom` clamped at 10px — a 10px square on a 9px orbit.
+
+### Zooming
+
+The heliocentric view and a moon system are ~3200× apart. Three things make that
+span usable:
+
+- **The wheel rate eases with depth** — ~1.7× per notch at the overview settling
+  to ~1.3× inside a system. A fixed 0.001 coefficient needed ~81 notches to
+  cross the gulf; an earlier level-snapping rate was worse in a different way
+  (2.3× jumps then a 0.7% dead notch), so the rate is a smooth monotonic
+  function of zoom with no snapping.
+- **Fitting a system eases** over ~520ms, interpolating zoom in log space.
+  Fitting Tern is a 3000× move; done instantly it read as a cut. Any direct
+  gesture (wheel, pan, pinch) cancels an in-flight move.
+- **`MAX_ZOOM` is 4200**, chosen so the *deepest* mooned system still fits the
+  canvas at full zoom (Tern's outer ring is 338px against a 340px half-canvas).
+  Shallower systems can be zoomed past, which is ordinary map behaviour.
+
+**The canvas backing store matches the element** at `devicePixelRatio` and draws
+through a `PX` transform, with a `ResizeObserver` catching size changes the window
+`resize` event misses. It was previously a fixed 860×680 stretched to ~1401px on
+this display — every frame upscaled ~1.6×, which is why zooming looked soft.
+
 ### Selection
 
 **What have I selected** is the top card in the right rail and the primary
@@ -130,7 +185,18 @@ python3 tests/test_infra.py
 python3 tests/test_markets.py
 python3 tests/test_contacts.py
 python3 tests/test_server.py
+python3 tests/test_page.py      # static gates for web/index.html
 ```
+
+`test_page.py` exists because the canvas renderer now carries more logic than the
+sim does (label placement, occlusion, zoom, marker scaling) and none of it is
+reachable from Python. A 200 from the server proves nothing about the page, so it
+checks the two things that actually break it: `node --check` on the extracted
+script, and a `getElementById` cross-check against the markup. It also pins the
+renderer invariants as static assertions — labels go through the single placement
+pass, the halo uses the theme background rather than ink, the zoom rate carries no
+level-snapping, markers are not `√zoom`-sized, and `MAX_ZOOM` still frames the
+deepest moon system.
 
 ## Design
 

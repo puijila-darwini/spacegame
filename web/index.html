@@ -392,13 +392,32 @@ const view = { x: 0, y: 0, zoom: 1 };
 let frameMode = "inertial";
 const THEME_KEY = "sol-merchant-theme";
 const THEMES = {
-  elite: {straw:"#F6B94A", royal:"#39D6E8", ink:"#D9F6FF", mut:"#6C9AA5", accent:"#39D6E8"},
-  greenhouse: {straw:"#F2E6A6", royal:"#6B3FA0", ink:"#EDE7C8", mut:"#9AA48F", accent:"#F2E6A6"},
+  elite: {straw:"#F6B94A", royal:"#39D6E8", ink:"#D9F6FF", mut:"#6C9AA5", accent:"#39D6E8", bg:"#010508"},
+  greenhouse: {straw:"#F2E6A6", royal:"#6B3FA0", ink:"#EDE7C8", mut:"#9AA48F", accent:"#F2E6A6", bg:"#0B1F1A"},
 };
 let themeName = (() => { try { return localStorage.getItem(THEME_KEY) || "elite"; } catch(e){ return "elite"; } })();
 let STRAW = THEMES[themeName].straw, ROYAL = THEMES[themeName].royal;
 const cv = document.getElementById("sys"), ctx = cv.getContext("2d");
 const W = cv.width, H = cv.height, CX = W / 2, CY = H / 2;
+// Logical size stays 860x680 forever; the backing store is resized to the
+// element's real CSS width x devicePixelRatio and everything is drawn through
+// a PX transform. The canvas was previously upscaled ~1.6x on this display,
+// which is why zooming in looked soft no matter how good the geometry was.
+let PX = 1;
+function fitCanvas(){
+  const cssW = Math.max(360, Math.round(cv.getBoundingClientRect().width || W));
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const bw = Math.round(cssW * dpr), bh = Math.round(bw * (H / W));
+  if(cv.width !== bw || cv.height !== bh){ cv.width = bw; cv.height = bh; }
+  PX = cv.width / W;
+}
+window.addEventListener("resize", () => { fitCanvas(); draw(); });
+// The element also changes size for reasons that have nothing to do with the
+// window -- the theme classes swap padding and borders, which left the backing
+// store 11px short of the element. Observe the element itself.
+if(typeof ResizeObserver === "function"){
+  new ResizeObserver(() => { fitCanvas(); draw(); }).observe(cv);
+}
 // Fitted to the outermost charted body so the overview always contains the
 // whole map. It was pinned to 9.9 for the planet-only chart; the Fulmaior Gate
 // rides past that, so a hard-coded divisor pushed the gate off screen.
@@ -410,8 +429,107 @@ function fitBaseScale(){
   BASE_SCALE = Math.min(W, H) / 2 / (maxA * OVERVIEW_MARGIN);
 }
 const PLANET_DISC_DIV = 60; // outermost ring distance, in planet display radii
-const MAX_ZOOM = 6000;      // real moon systems are ~0.26% of the helio orbit
+// Capped so the deepest moon system still fits the canvas at full zoom: the
+// outer ring of Tern is a=0.00373, and 0.00373 * BASE_SCALE(21.6) * 4200 = 338px
+// against a 340px half-height. Raising this let you zoom into a state where
+// the outer moon's orbit had run off screen and the view read as broken.
+const MAX_ZOOM = 4200;
 const MIN_RING_PX = 5;       // below this a ring is a speck, not a structure
+
+// --- Label placement --------------------------------------------------------
+// Every label on the canvas goes through ONE pass so they all share a single
+// collision space. Each subsystem used to draw its own text at a hardcoded
+// 10-11px, which put an 11px label on a 4px planet and stacked four of them on
+// the same point in Tern's system (TERN over TERN SURFACE over TERN HIGHPORT
+// over TERN ELEVATOR CROWN). Candidates are sorted by priority; each takes the
+// first slot that clears every placed box AND every marker anchor on the map,
+// and is dropped entirely when nothing fits. Selection always wins.
+const LABEL_SLOTS = [
+  [1, -0.28], [-1, -0.28], [1, 0.28], [-1, 0.28],
+  [0, -1], [0, 1], [1, 1], [-1, 1], [1, -1], [-1, -1],
+];
+const LABEL_PAD = 3;
+function labelFontPx(discPx){
+  // Type has to scale with its subject. A 3213x system view puts a planet 4px
+  // across, and a fixed 11px label was nearly three times the size of the thing
+  // it named.
+  return Math.max(8, Math.min(12, Math.round(discPx * 1.9)));
+}
+function labelBox(x, y, r, w, h, slot){
+  const gap = r + 5;
+  const cx = x + slot[0] * gap;
+  const cy = y + slot[1] * (gap + h * 0.5);
+  const left = slot[0] < 0 ? cx - w : cx;
+  return {x0:left - LABEL_PAD, y0:cy - h * 0.5 - LABEL_PAD,
+          x1:left + w + LABEL_PAD, y1:cy + h * 0.5 + LABEL_PAD,
+          tx:left, ty:cy + h * 0.36, align:slot[0] < 0 ? "right" : "left"};
+}
+const boxHits = (a, b) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+function placeLabels(cands){
+  const placed = [];
+  for(const c of cands){
+    let box = null;
+    for(const slot of LABEL_SLOTS){
+      const trial = labelBox(c.x, c.y, c.r, c.w, c.h, slot);
+      if(trial.x0 < 2 || trial.x1 > W - 2 || trial.y0 < 2 || trial.y1 > H - 2) continue;
+      if(placed.some(p => boxHits(p.box, trial))) continue;
+      // Never bury a marker. A label that hides the thing you are reading the
+      // chart for is worse than no label.
+      let buries = false;
+      for(const a of cands){
+        if(a === c || !a.marker) continue;
+        if(a.x + a.marker + 1 > trial.x0 && a.x - a.marker - 1 < trial.x1 &&
+           a.y + a.marker + 1 > trial.y0 && a.y - a.marker - 1 < trial.y1){ buries = true; break; }
+      }
+      if(buries) continue;
+      box = trial; break;
+    }
+    if(!box){
+      if(!c.always) continue;
+      box = labelBox(c.x, c.y, c.r, c.w, c.h, LABEL_SLOTS[0]);
+    }
+    placed.push({cand:c, box});
+  }
+  return placed;
+}
+function drawLabels(cands){
+  const sorted = [...cands].sort((a, b) => (b.pri || 0) - (a.pri || 0));
+  for(const {cand, box} of placeLabels(sorted)){
+    ctx.font = `${cand.bold ? "bold " : ""}${cand.h}px sans-serif`;
+    ctx.textAlign = box.align;
+    ctx.textBaseline = "alphabetic";
+    if(cand.halo){
+      // Dark and thin, NOT a light outline: the halo's job is to separate the
+      // text from the orbit rings behind it. Stroking in the ink colour at
+      // 2.5px on an 8px font bloomed the counters and made labels unreadable.
+      ctx.strokeStyle = THEMES[themeName].bg;
+      ctx.globalAlpha = 0.72;
+      ctx.lineWidth = Math.max(1, cand.h * 0.16);
+      ctx.lineJoin = "round";
+      ctx.miterLimit = 2;
+      ctx.strokeText(cand.text, box.tx, box.ty);
+      ctx.globalAlpha = 1;
+    }
+    ctx.fillStyle = cand.color || tint(THEMES[themeName].ink, .85);
+    ctx.fillText(cand.text, box.tx, box.ty);
+  }
+}
+function shortLocName(loc){
+  // "Tern Elevator Crown" is 114px of label on a 17px orbit ring. The tail
+  // word identifies it: Crown, Highport, Halo, Anchorage, Skyhook, Gateway.
+  if(loc.kind === "surface") return loc.name;
+  const words = String(loc.name).split(" ").filter(Boolean);
+  const tail = words[words.length - 1];
+  return tail && tail.length >= 3 ? tail : loc.name;
+}
+function stationMarkerR(){
+  // Was 3.5*sqrt(zoom) clamped to 10px: a 10px square on a 9px orbit around a
+  // 4px planet. Markers must stay smaller than the world they mark.
+  return Math.max(1.6, Math.min(3.4, 1.4 + Math.log10(Math.max(1, view.zoom)) * 0.55));
+}
+function shipGlyphR(){
+  return Math.max(4, Math.min(7, 3 + Math.log10(Math.max(1, view.zoom)) * 0.9));
+}
 const scale = () => BASE_SCALE * view.zoom;
 function frameOrigin(){
   const scene = DRAW_SNAP || SNAP;
@@ -452,6 +570,8 @@ function themeLine(alpha){ return tint(themeName === "elite" ? THEMES.elite.roya
 function applyTheme(name){
   themeName = THEMES[name] ? name : "elite";
   STRAW = THEMES[themeName].straw; ROYAL = THEMES[themeName].royal;
+  fitCanvas();
+  requestAnimationFrame(() => { fitCanvas(); draw(); });   // re-measure after reflow
   document.body.classList.toggle("elite", themeName === "elite");
   document.body.classList.toggle("greenhouse", themeName === "greenhouse");
   try { localStorage.setItem(THEME_KEY, themeName); } catch(e){}
@@ -466,14 +586,42 @@ function updateViewChip(){
   const frameChip = document.getElementById("chip-frame");
   if(frameChip) frameChip.textContent = `frame: ${frameOrigin().label}`;
 }
+let camAnim = null;
+function animateCameraTo(target, dur = 520){
+  // Fitting a system is a ~3000x jump. Doing it instantly reads as a cut; a
+  // half-second eased move reads as travelling there. Zoom interpolates in
+  // log space so the apparent rate stays constant instead of exploding.
+  const to = {x:target.x || 0, y:target.y || 0,
+              zoom:Math.max(0.35, Math.min(MAX_ZOOM, target.zoom || 1))};
+  if(Math.abs(Math.log(to.zoom / view.zoom)) < 0.02 &&
+     Math.abs(to.x - view.x) < 0.5 && Math.abs(to.y - view.y) < 0.5){
+    view.x = to.x; view.y = to.y; view.zoom = to.zoom;
+    camAnim = null; updateViewChip(); draw();
+    return;
+  }
+  camAnim = {from:{x:view.x, y:view.y, z:view.zoom},
+             to:{x:to.x, y:to.y, z:to.zoom}, start:performance.now(), dur};
+}
+function stepCamera(now){
+  if(!camAnim) return false;
+  const t = Math.min(1, (now - camAnim.start) / camAnim.dur);
+  const e = t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2;  // easeInOutCubic
+  view.x = camAnim.from.x + (camAnim.to.x - camAnim.from.x) * e;
+  view.y = camAnim.from.y + (camAnim.to.y - camAnim.from.y) * e;
+  view.zoom = Math.exp(Math.log(camAnim.from.z) +
+                       (Math.log(camAnim.to.z) - Math.log(camAnim.from.z)) * e);
+  if(t >= 1) camAnim = null;
+  updateViewChip(); draw();
+  return true;
+}
 function resetView(){
   frameMode = "inertial";
   const frameSelect = document.getElementById("frame-mode");
   if(frameSelect) frameSelect.value = frameMode;
-  view.x = 0; view.y = 0; view.zoom = 1;
-  updateViewChip(); draw();
+  animateCameraTo({x:0, y:0, zoom:1});
 }
 function zoomAt(clientX, clientY, factor){
+  camAnim = null;   // a direct gesture always wins over an in-flight move
   const r = cv.getBoundingClientRect();
   const mx = (clientX - r.left) * (W / r.width);
   const my = (clientY - r.top) * (H / r.height);
@@ -664,6 +812,7 @@ function setSnapshot(next, animate = true){
 function animateScene(now){
   frameCount++;
   updateDiagnostics();
+  stepCamera(now);
   if(transition){
     const fraction = Math.min(1, (now - transition.start) / transition.duration);
     DRAW_SNAP = blendSnapshots(transition.from, transition.to, fraction);
@@ -822,6 +971,7 @@ function runPaletteCommand(){
 }
 
 async function boot(fromPoll){
+  fitCanvas();
   // live backend wins; otherwise fall back to the static file
   try{
     const r = await fetch("/api/snapshot", {cache:"no-store"});
@@ -986,9 +1136,7 @@ function enterSystemView(){
   document.getElementById("frame-mode").value = frameMode;
   const body = bodyById(sel.body);
   if(!body) return;
-  view.x = 0; view.y = 0;
-  view.zoom = systemZoomFor(body.id);
-  updateViewChip(); draw();
+  animateCameraTo({x:0, y:0, zoom:systemZoomFor(body.id)});
   render();
 }
 function setFrameMode(mode){
@@ -1019,6 +1167,7 @@ cv.addEventListener("pointermove", e => {
     if(Math.hypot(e.clientX - gesture.startX, e.clientY - gesture.startY) > 5)
       gesture.moved = true;
     if(gesture.moved){
+      camAnim = null;
       view.x -= dx / scale(); view.y += dy / scale();
       updateViewChip(); draw();
     }
@@ -1045,9 +1194,22 @@ function endPointer(e){
 }
 cv.addEventListener("pointerup", endPointer);
 cv.addEventListener("pointercancel", endPointer);
+function wheelZoomStep(deltaY){
+  // Constant-ish fractional step that eases with depth: ~1.7x per notch near
+  // the overview, settling to ~1.3x deep inside a system. The previous
+  // level-snapping version was jerky -- it swung 2.3x jumps followed by a 0.7%
+  // dead notch, because the rate changed between notches and then snapped to
+  // the next fitted view. This one is monotonic and uniform, so consecutive
+  // notches feel like continuous travel, and it still crosses the ~3200x gulf
+  // between the heliocentric view and a moon system in ~17 notches.
+  const depth = Math.exp(-Math.log10(Math.max(1, view.zoom)) / 2);
+  const rate = 0.26 + 0.25 * depth;
+  const unit = Math.min(1, Math.abs(deltaY) / 100);
+  return Math.exp(-Math.sign(deltaY || 1) * unit * rate);
+}
 cv.addEventListener("wheel", e => {
   e.preventDefault();
-  zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.001));
+  zoomAt(e.clientX, e.clientY, wheelZoomStep(e.deltaY));
 }, {passive:false});
 cv.addEventListener("dblclick", e => {
   const hit = pickAt(e);
@@ -1060,9 +1222,9 @@ window.addEventListener("keydown", e => {
   if(e.key === "/"){ e.preventDefault(); openPalette(); }
   else if(e.key === "0") resetView();
   else if(e.key === "+" || e.key === "="){
-    const r = cv.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1.2);
+    const r = cv.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, Math.exp(0.32));
   } else if(e.key === "-"){
-    const r = cv.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1 / 1.2);
+    const r = cv.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, Math.exp(-0.32));
   } else if(e.key.toLowerCase() === "f") enterSystemView();
   else if(e.key.toLowerCase() === "d") toggleDiagnostics();
 });
@@ -1094,43 +1256,57 @@ function bodyDisplayRadius(body, drawScale){
   const extent = Math.max(childExtent, locationExtent);
   return Math.max(3, Math.min(60, extent * drawScale / PLANET_DISC_DIV));
 }
-function drawGate(body, X, Y, drawScale){
+function drawGate(body, X, Y, labels){
   // A gate is not a world: no disc, no orbit ring of its own to imply scale.
   // Two counter-rotating rings plus a status-coloured throat, so it reads as
   // an aperture and so a sealed mouth looks different from an open one.
   const gate = (SNAP.gates || []).find(g => g.body === body.id);
   const open = gate && gate.status === "open";
   const near = gate && gate.status === "stabilising";
-  const R = 13;
+  const R = Math.max(7, Math.min(13, 4 + Math.log10(Math.max(1, view.zoom)) * 2.2));
   ctx.save();
   ctx.translate(X, Y);
   ctx.strokeStyle = open ? STRAW : near ? ROYAL : tint(THEMES[themeName].mut, .75);
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 1.4;
   for(const [i, spin] of [[0, 1], [1, -1]].entries()){
     ctx.save(); ctx.rotate((performance.now() / 2400) * spin + i * 0.5);
     ctx.setLineDash(open ? [] : [3, 4]);
-    ctx.beginPath(); ctx.arc(0, 0, R + i * 4, 0.4, 0.4 + Math.PI * 1.5); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, R + i * 3.5, 0.4, 0.4 + Math.PI * 1.5); ctx.stroke();
     ctx.restore();
   }
   ctx.setLineDash([]);
   ctx.fillStyle = open ? STRAW : themeLine(.5);
-  ctx.beginPath(); ctx.arc(0, 0, 4.5, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(0, 0, 3.2, 0, Math.PI * 2); ctx.fill();
   if(sel.body === body.id){
-    ctx.strokeStyle = ROYAL; ctx.lineWidth = 1.6;
-    ctx.beginPath(); ctx.arc(0, 0, R + 11, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = ROYAL; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.arc(0, 0, R + 8, 0, Math.PI * 2); ctx.stroke();
   }
   ctx.restore();
-  ctx.fillStyle = tint(THEMES[themeName].ink, .85); ctx.font = "11px sans-serif"; ctx.textAlign = "left";
-  ctx.fillText(labelFor(body.id) + (open ? " · OPEN" : near ? " · FORMING" : " · SEALED"), X + R + 8, Y + 4);
+  if(X > -60 && X < W + 60 && Y > -30 && Y < H + 30){
+    const text = labelFor(body.id) + (open ? " OPEN" : near ? " FORMING" : " SEALED");
+    const h = 10;
+    ctx.font = `${h}px sans-serif`;
+    labels.push({x:X, y:Y, r:R + 4, w:ctx.measureText(text).width, h, text,
+      marker:R, halo:true, pri:sel.body === body.id ? 95 : 50, always:sel.body === body.id,
+      color:open ? STRAW : tint(THEMES[themeName].ink, .85)});
+  }
 }
-function drawLocationMarkers(){
+function drawLocationMarkers(labels){
+  // Surfaces are body-anchored: they sit exactly on their planet's centre, so
+  // their label always landed underneath the planet's own label. They get no
+  // marker (unchanged: surfaces are not orbital objects) and no label; the
+  // selection card is where you read their detail.
   for(const loc of SNAP.locations || []){
     if(loc.kind === "surface") continue;
     const selected = sel.location === loc.id;
     if(view.zoom < 1.15 && !selected) continue;
     const X = px(loc.x), Y = py(loc.y);
-    const markerR = Math.max(3, Math.min(10,
-      (loc.kind === "station" ? 3.5 : loc.kind === "terminal" ? 3 : 2.2) * Math.sqrt(view.zoom)));
+    if(X < -30 || X > W + 30 || Y < -30 || Y > H + 30){
+      hitmap.push({kind:"location", id:loc.id, x:X, y:Y, r:12});
+      continue;
+    }
+    const base = stationMarkerR();
+    const markerR = loc.kind === "station" ? base : base * 0.85;
     ctx.fillStyle = loc.kind === "station" ? STRAW : loc.kind === "terminal" ? ROYAL : tint(THEMES[themeName].mut, .85);
     ctx.beginPath();
     if(loc.kind === "station") ctx.rect(X - markerR, Y - markerR, markerR * 2, markerR * 2);
@@ -1140,14 +1316,17 @@ function drawLocationMarkers(){
     } else ctx.arc(X, Y, markerR, 0, Math.PI * 2);
     ctx.fill();
     if(selected){
-      ctx.strokeStyle = STRAW; ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.arc(X, Y, markerR + 5, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = STRAW; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(X, Y, markerR + 4, 0, Math.PI * 2); ctx.stroke();
     }
-    if(view.zoom >= 3 || selected){
-      ctx.fillStyle = tint(THEMES[themeName].ink, .9); ctx.font = "10px sans-serif"; ctx.textAlign = "left";
-      ctx.fillText(themeName === "elite" ? loc.name.toUpperCase() : loc.name, X + markerR + 4, Y + 3);
-    }
-    hitmap.push({kind:"location", id:loc.id, x:X, y:Y, r:Math.max(12, markerR + 6)});
+    const text = themeName === "elite" ? shortLocName(loc).toUpperCase() : shortLocName(loc);
+    const h = Math.max(8, Math.min(10, Math.round(markerR * 2.6)));
+    ctx.font = `${h}px sans-serif`;
+    labels.push({x:X, y:Y, r:markerR, w:ctx.measureText(text).width, h,
+      text, marker:markerR + 1, halo:true,
+      pri:selected ? 80 : 10, always:selected,
+      color:loc.kind === "station" ? tint(STRAW, .92) : tint(ROYAL, .92)});
+    hitmap.push({kind:"location", id:loc.id, x:X, y:Y, r:Math.max(11, markerR + 5)});
   }
 }
 
@@ -1168,8 +1347,10 @@ function drawBackdrop(){
 function draw(){
   const authoritative = SNAP;
   if(DRAW_SNAP) SNAP = DRAW_SNAP;
+  ctx.setTransform(PX, 0, 0, PX, 0, 0);
   ctx.clearRect(0, 0, W, H);
   hitmap = [];
+  const labels = [];
   if(!SNAP){
     ctx.fillStyle = STRAW; ctx.font = "italic 22px Georgia, serif"; ctx.textAlign = "center";
     ctx.fillText("drop a snapshot.json anywhere on this page", CX, CY);
@@ -1239,10 +1420,11 @@ function draw(){
   for(const b of SNAP.bodies){
     const X = px(b.x), Y = py(b.y);
     const r = bodyDisplayRadius(b, drawScale);
-    if(b.kind === "wormhole"){ drawGate(b, X, Y, drawScale); hitmap.push({kind:"body", id:b.id, x:X, y:Y, r:20}); continue; }
+    if(b.kind === "wormhole"){ drawGate(b, X, Y, labels); hitmap.push({kind:"body", id:b.id, x:X, y:Y, r:18}); continue; }
     // Moons are sub-pixel from the heliocentric view; hide the body and its
     // label rather than stacking moons on top of their planet.
     if(b.parent && view.zoom * b.a * BASE_SCALE < MIN_RING_PX) continue;
+    const onScreen = X > -40 && X < W + 40 && Y > -40 && Y < H + 40;
     if(b.id === "sun"){
       const glow = r * 1.9;
       const g = ctx.createRadialGradient(X, Y, 1, X, Y, glow);
@@ -1251,31 +1433,46 @@ function draw(){
     }
     ctx.fillStyle = b.id === "sun" ? STRAW : (b.parent ? (themeName === "elite" ? ROYAL : tint(THEMES[themeName].mut, .85)) : STRAW);
     ctx.beginPath(); ctx.arc(X, Y, r, 0, Math.PI * 2); ctx.fill();
-    if(sel.body === b.id || sel.port === b.id){
-      ctx.strokeStyle = ROYAL; ctx.lineWidth = 2.5;
-      ctx.beginPath(); ctx.arc(X, Y, r + 5, 0, Math.PI * 2); ctx.stroke();
+    const isSel = sel.body === b.id || sel.port === b.id;
+    if(isSel){
+      ctx.strokeStyle = ROYAL; ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.arc(X, Y, r + 4, 0, Math.PI * 2); ctx.stroke();
     }
-    ctx.fillStyle = tint(THEMES[themeName].ink, .85); ctx.font = "11px sans-serif"; ctx.textAlign = "left";
-    ctx.fillText(labelFor(b.id), X + r + 4, Y + 4);
-    hitmap.push({kind:"body", id:b.id, x:X, y:Y, r:Math.max(12, r + 6)});
+    if(onScreen){
+      const h = labelFontPx(Math.max(r, 3));
+      const text = labelFor(b.id);
+      ctx.font = `${h}px sans-serif`;
+      labels.push({x:X, y:Y, r, w:ctx.measureText(text).width, h,
+        text, marker:r + 1, halo:true,
+        pri:isSel ? 100 : (b.parent ? 30 : 60), always:isSel,
+        color:b.parent ? (themeName === "elite" ? ROYAL : tint(THEMES[themeName].ink, .8)) : tint(THEMES[themeName].ink, .85)});
+    }
+    hitmap.push({kind:"body", id:b.id, x:X, y:Y, r:Math.max(10, r + 6)});
   }
-  drawLocationMarkers();
+  drawLocationMarkers(labels);
   for(const s of SNAP.ships){
     const X = px(s.x), Y = py(s.y);
+    const g = shipGlyphR();
     ctx.fillStyle = ROYAL;
     ctx.beginPath();
-    ctx.moveTo(X, Y - 8); ctx.lineTo(X + 6, Y + 5); ctx.lineTo(X, Y + 2); ctx.lineTo(X - 6, Y + 5);
+    ctx.moveTo(X, Y - g); ctx.lineTo(X + g * 0.75, Y + g * 0.62);
+    ctx.lineTo(X, Y + g * 0.25); ctx.lineTo(X - g * 0.75, Y + g * 0.62);
     ctx.closePath(); ctx.fill();
     ctx.strokeStyle = STRAW; ctx.lineWidth = 1; ctx.stroke();
     if(sel.ship === s.id){
-      ctx.strokeStyle = STRAW; ctx.lineWidth = 1.6;
-      ctx.beginPath(); ctx.arc(X, Y, 13, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = STRAW; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(X, Y, g + 4, 0, Math.PI * 2); ctx.stroke();
     }
-    ctx.fillStyle = STRAW; ctx.font = "bold 11px sans-serif"; ctx.textAlign = "left";
-    const tag = `${(s.name || shipName(s.id)).toUpperCase()}${s.leg ? ` · ETA ${s.eta_d.toFixed(1)}d` : ""}`;
-    ctx.fillText(tag, X + 9, Y - 8);
-    hitmap.push({kind:"ship", id:s.id, x:X, y:Y, r:12});
+    if(X > -60 && X < W + 60 && Y > -40 && Y < H + 40){
+      const h = Math.max(9, Math.min(11, Math.round(g * 1.6)));
+      const text = `${(s.name || shipName(s.id)).toUpperCase()}${s.leg ? ` ${s.eta_d.toFixed(0)}d` : ""}`;
+      ctx.font = `bold ${h}px sans-serif`;
+      labels.push({x:X, y:Y, r:g, w:ctx.measureText(text).width, h,
+        text, bold:true, color:STRAW, halo:true, marker:g, pri:90, always:sel.ship === s.id});
+    }
+    hitmap.push({kind:"ship", id:s.id, x:X, y:Y, r:Math.max(11, g + 4)});
   }
+  drawLabels(labels);
   const frame = frameOrigin();
   ctx.fillStyle = themeLine(.78); ctx.font = "bold 10px sans-serif"; ctx.textAlign = "left";
   ctx.fillText(`FRAME · ${frame.label.toUpperCase()}`, 12, H - 14);
