@@ -365,6 +365,9 @@
     <div id="section-contacts" class="drawer-section" hidden>
       <div class="card"><span class="pill">CONTACTS</span><div class="filterbar"><input id="contact-search" type="search" placeholder="find name, port, occupation…"></div><div class="body" id="p-contacts"></div></div>
     </div>
+    <div id="section-calendar" class="drawer-section" hidden>
+      <div class="card"><span class="pill">CALENDAR</span><div class="body" id="p-calendar"></div></div>
+    </div>
     <div id="section-settings" class="drawer-section" hidden>
       <div class="card"><span class="pill">SETTINGS</span><div class="body" id="p-settings"></div></div>
     </div>
@@ -1440,7 +1443,8 @@ function draw(){
     }
     if(onScreen){
       const h = labelFontPx(Math.max(r, 3));
-      const text = labelFor(b.id);
+      const ph = (SNAP.calendar && SNAP.calendar.moons || []).find(m => m.id === b.id);
+      const text = labelFor(b.id) + (ph ? ` ${moonPhaseGlyph(ph.fraction)}` : "");
       ctx.font = `${h}px sans-serif`;
       labels.push({x:X, y:Y, r, w:ctx.measureText(text).width, h,
         text, marker:r + 1, halo:true,
@@ -1504,7 +1508,7 @@ function toggleStored(set, id, storageName){
   saveLocalSet(storageName, set);
   render();
 }
-const DRAWER_TITLES = {ledger:"LEDGER", body:"BODY / FRAME", ship:"SHIP", flight:"FLIGHT PLANNER", port:"MARKET", ops:"WATCH / ARRIVALS", contracts:"CONTRACTS", contacts:"CONTACTS", settings:"SETTINGS", report:"ARRIVAL REPORT"};
+const DRAWER_TITLES = {ledger:"LEDGER", body:"BODY / FRAME", ship:"SHIP", flight:"FLIGHT PLANNER", port:"MARKET", ops:"WATCH / ARRIVALS", contracts:"CONTRACTS", contacts:"CONTACTS", settings:"SETTINGS", report:"ARRIVAL REPORT", calendar:"CALENDAR"};
 let drawerSection = null;
 function openDrawer(section){
   drawerSection = section;
@@ -1582,6 +1586,8 @@ function selectionPanel(){
   if(!body) return `<div class="sel-note">Nothing selected.</div>`;
   if(body.kind === "wormhole") return wormholePanel(body);
   const moons = (SNAP.bodies || []).filter(b => b.parent === body.id);
+  const c = cal();
+  const myPhase = c && body.parent ? (c.moons || []).find(m => m.id === body.id) : null;
   const here = (SNAP.locations || []).filter(l => l.body === body.id);
   const port = SNAP.ports[body.id];
   const parent = body.parent ? bodyById(body.parent) : null;
@@ -1592,9 +1598,14 @@ function selectionPanel(){
     body.a > 0 ? [parent ? "radius" : "heliocentric", `${body.a.toFixed(4)}`] : null,
     body.a > 0 ? ["period", `${body.period.toFixed(1)} d`] : null,
     body.rotation_d ? ["sidereal day", `${body.rotation_d.toFixed(2)} d`] : null,
-    body.a > 0 ? ["phase", `${(body.angle * 180 / Math.PI % 360).toFixed(0)}°`] : null,
+    myPhase ? ["moon phase", `${moonPhaseGlyph(myPhase.fraction)} ${esc(myPhase.name)} · ${Math.round(myPhase.illumination * 100)}% lit`] : null,
+    myPhase ? ["synodic", `${myPhase.synodic_days} d`] : null,
+    body.a > 0 ? ["longitude", `${(body.angle * 180 / Math.PI % 360).toFixed(0)}°`] : null,
     helio !== null ? ["from sun", helio.toFixed(3)] : null,
-    moons.length ? ["moons", moons.map(m => `${esc(m.name || m.id)} ${m.a.toFixed(3)}`).join("<br>")] : null,
+    moons.length ? ["moons", moons.map(m => {
+      const ph = c && (c.moons || []).find(x => x.id === m.id);
+      return `${esc(m.name || m.id)} ${m.a.toFixed(3)}${ph ? ` <span style="opacity:.75">${moonPhaseGlyph(ph.fraction)} ${esc(ph.name)}</span>` : ""}`;
+    }).join("<br>")] : null,
     here.length ? ["locations", here.map(l => esc(l.name)).join("<br>")] : null,
     ["market", port ? `${Object.keys(port.asks || {}).length} commodities` : "none"],
   ];
@@ -1628,20 +1639,103 @@ function nextEventSummary(){
   return next ? `<div class="rowline"><span class="tape">NEXT EVENT</span><span>${esc(next.label)} · ${next.days.toFixed(0)}d</span></div>` :
     "<div class='tape'>NEXT EVENT · none scheduled</div>";
 }
+function cal(){
+  return SNAP.calendar || null;
+}
+function calHeadline(){
+  const c = cal();
+  if(!c) return "t = " + (SNAP ? SNAP.t : "—") + "d";
+  const solar = c.solar_time ? " · " + c.solar_time.text + " @" + c.solar_time.at : "";
+  return c.new_rational.text + " · " + c.day.name + solar;
+}
+function moonPhaseGlyph(fraction){
+  // 8-phase disc, lit from the right while waxing.
+  const i = Math.round(fraction * 8) % 8;
+  return ["●", "◑", "◑", "◒", "○", "◓", "◓", "◒"][i];
+}
+function phaseRow(m){
+  const bar = Math.round(m.illumination * 10);
+  return `<div class="rowline"><span class="cname">${esc(m.name_full || m.id)}</span>
+    <span>${esc(m.name)} · ${Math.round(m.illumination * 100)}%
+    <span style="opacity:.7">${"█".repeat(bar)}${"░".repeat(10 - bar)}</span>
+    · ${m.synodic_days}d</span></div>`;
+}
+function calendarPanel(){
+  const c = cal();
+  if(!c) return `<div class="sel-note">No calendar in this snapshot.</div>`;
+  const sign = c.sign, dow = c.day, nr = c.new_rational;
+  const host = SNAP.ships && SNAP.ships[0] ? (SNAP.ships[0].at || (SNAP.ships[0].leg && SNAP.ships[0].leg.to)) : null;
+  const localMoons = (c.moons || []).filter(m => m.primary === host || (host && bodyById(host) && bodyById(host).parent === m.primary));
+  const anyMoons = localMoons.length ? localMoons : (c.moons || []);
+  const conj = c.conjunctions || [];
+  return `<div class="sel-head"><span class="sel-title">${esc(nr.text)}</span><span class="sel-kind">${esc(dow.text)}</span></div>
+    ${selGrid([
+      ["day", `${nr.day_of_year} of 360`],
+      ["year", `${Math.round(c.year_fraction * 100)}% through`],
+      ["sign", `${esc(sign.name)} · ${esc(sign.element)} ${esc(sign.mode)}`],
+      ["ruled by", esc(sign.ruler)],
+      ["sect", `${esc(sign.sect)} · ${esc(sign.time_of_day)}`],
+      c.solar_time ? ["local solar", `${esc(c.solar_time.text)} at ${esc(c.solar_time.at)}`] : null,
+      c.body_clock ? ["planetary hour", esc(c.body_clock.text)] : null,
+    ])}
+    <div class="tape">MOONS ${host ? "· " + esc(host) : ""}</div>
+    ${anyMoons.length ? anyMoons.map(phaseRow).join("") : `<div class="sel-note">No moons at ${esc(host || "this port")}.</div>`}
+    ${conj.length ? `<div class="tape">NEXT CONJUNCTION</div>
+      ${conj.map(j => `<div class="rowline"><span class="cname">${esc(j.pair.join(" + "))}</span>
+        <span>${esc(j.date)} · in ${j.day}d · every ${j.period_days}d</span></div>`).join("")}` : ""}
+    <div class="tape">RELIGIOUS RECKONING</div>
+    <div class="preview">${esc(c.religious.text)}</div>
+    <div class="tape">OLD RECKONING</div>
+    <div class="rowline"><span class="cname">${esc(c.old_rational.text)}</span><span>drifted ${Math.abs(c.new_rational.year - c.old_rational.year)}y</span></div>
+    <div class="tape">CLOCKS</div>
+    ${selGrid([
+      ["new standard", esc(c.new_time.text) + " · 24h"],
+      ["old rational", esc(c.old_time.text) + " · 10h"],
+    ])}
+    <div class="sel-note">The sim advances in whole days, so the formal 24-hour clock reads midnight. Local solar time comes from each world's own rotation and is the one that moves.</div>
+    <div class="ctl"><button class="hud-button" data-cal-jump="now">Now</button>
+      <button class="hud-button" data-cal-jump="nextnew">Next New Moon</button>
+      <button class="hud-button" data-cal-jump="nextfull">Next Full Moon</button></div>`;
+}
+function jumpCalendar(target){
+  if(target === "now"){ openDrawer("calendar"); return; }
+  const c = cal();
+  if(!c || !c.moons || !c.moons.length) return;
+  const ship = SNAP.ships.find(x => x.id === sel.ship) || SNAP.ships[0];
+  const host = ship && (ship.at || (ship.leg && ship.leg.to));
+  const primary = host && bodyById(host) ? (bodyById(host).parent || bodyById(host).id) : null;
+  const pool = c.moons.filter(m => !primary || m.primary === primary);
+  const list = pool.length ? pool : c.moons;
+  const wantFull = target === "nextfull";
+  // Fraction sweeps 0 -> 1 (new -> full -> new), so solve for the next hit.
+  let days = null;
+  for(const m of list){
+    let f = m.fraction;
+    for(let i=0;i<3;i++){
+      const d = wantFull ? (0.5 - f) : (f > 0.5 ? 1 - f : -f);
+      const dd = ((d % 1) + 1) % 1 * (m.synodic_days || 32);
+      if(days === null || dd < days) days = dd;
+      f = (f + dd / (m.synodic_days || 32)) % 1;
+    }
+  }
+  if(days === null) return;
+  openDrawer("calendar");
+  toast(`${wantFull ? "Full" : "New"} ${wantFull ? "moon" : "moon"} in ${days.toFixed(1)}d — advance the clock to reach it`);
+}
 function hudPanel(){
   const s = SNAP.ships.find(x => x.id === sel.ship) || SNAP.ships[0];
   const where = s && s.leg ? `→ ${s.leg.to}` : s && s.at ? s.at : "unknown";
   const cargo = s ? Object.values(s.cargo || {}).reduce((a, b) => a + b, 0) : 0;
-  const nextPort = SNAP.ports[sel.port];
-  const summary = nextPort ? Object.keys(nextPort.asks || {}).length : 0;
   const campaign = SNAP.campaign || {captain:"Commander", difficulty:"balanced", name:"Sol Merchant", company:""};
   const hull = s ? (s.name || shipName(s.id)) : "—";
+  const c = cal();
+  const dateRow = c ? `<div class="tape">${esc(c.new_rational.text.toUpperCase())} · ${esc(c.day.text.toUpperCase())}${c.solar_time ? " · " + esc(c.solar_time.text) + " LOCAL" : ""}</div>` : "";
   return `<div class="rowline"><span class="cname">${esc(campaign.company || campaign.name)}</span><span>${esc(campaign.captain)} · ${esc(campaign.difficulty)}</span></div>
-    <div class="rowline"><span class="cname">${esc(campaign.name)}</span><span>t=${SNAP.t.toFixed(1)}d</span></div>
+    <div class="rowline"><span class="cname">${esc(campaign.name)}</span><span>day ${Math.floor(SNAP.t)} of the campaign</span></div>
+    ${dateRow}
     <div class="rowline"><span class="cname">${esc(hull)} · ${esc(where)}</span><span>${cargo}t hold · ${s ? s.dv.toFixed(2) : "—"} dv</span></div>
-    <div class="tape">CURRENT PORT · ${esc((sel.port || "—").toUpperCase())} · ${summary} markets</div>
-    ${nextEventSummary()}
     <div class="ctl"><button class="hud-button" data-open="port">Open market</button><button class="hud-button" data-open="flight">Plan flight</button><button class="hud-button" data-open="ship">Ship</button>
+      <button class="hud-button" data-open="calendar">Calendar</button>
       <button class="hud-button" data-open="ledger">Log</button><button class="hud-button" data-open="ops">Watch</button>
       <button class="hud-button" data-open="contracts">Contracts</button><button class="hud-button" data-open="contacts">Contacts</button>
       <button class="hud-button" data-open="settings">Settings</button><button class="hud-button" id="hud-help">Help</button></div>`;
@@ -2002,7 +2096,7 @@ function wireLive(){
 function render(){
   draw();
   if(!SNAP) return;
-  document.getElementById("chip-t").textContent = "t = " + SNAP.t + "d";
+  document.getElementById("chip-t").textContent = calHeadline();
   document.getElementById("chip-cr").textContent = SNAP.credits.toLocaleString() + " cr";
   const bodyJump = document.getElementById("body-jump");
   bodyJump.innerHTML = bodyOptions(sel.body);
@@ -2013,6 +2107,7 @@ function render(){
   document.getElementById("p-activity").innerHTML = activityPanel();
   document.getElementById("p-settings").innerHTML = settingsPanel();
   document.getElementById("p-report").innerHTML = reportPanel();
+  document.getElementById("p-calendar").innerHTML = calendarPanel();
   document.getElementById("p-body").innerHTML = bodyPanel();
   document.getElementById("p-ship").innerHTML = shipPanel();
   document.getElementById("p-flight").innerHTML = flightPanel();
@@ -2029,6 +2124,9 @@ function render(){
   });
   document.querySelectorAll("[data-sel-open]").forEach(button => {
     button.onclick = () => openDrawer(button.dataset.selOpen);
+  });
+  document.querySelectorAll("[data-cal-jump]").forEach(button => {
+    button.onclick = () => jumpCalendar(button.dataset.calJump);
   });
   document.querySelectorAll("[data-sel-focus-body]").forEach(button => {
     button.onclick = () => {

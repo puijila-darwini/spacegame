@@ -175,6 +175,75 @@ that bug snapped every world straight to its final position part-way through,
 which read as a broken orbit. Sweep duration scales with the size of the jump
 (1.2–3.2s).
 
+### Timekeeping
+
+`sim/calendar.py` is a port of `pthmud/world/timekeeping.py`, and the port is
+lossless because **a Sol year is 360 days** — the same as the MUD's
+`GAME_YEAR / DAY_LENGTH`. The MUD measures `t` in game-*seconds*; we already
+count `t` in game-*days*, so this is the MUD's calendar with the seconds divided
+out. That is why `sim/orbits.py` calls its periods MUD-literal: Moon is 30d
+(360/12) and Tide is 360/7d. `test_sol_year_is_360_days` pins the agreement.
+
+Four calendars and two clocks, all from `t`:
+
+| system | shape | epoch |
+|---|---|---|
+| **New Rational** (official) | 12 zodiac months of exactly 30d, astronomical, begins at 0° Aries | calendar reform, t = −800y |
+| **Old Rational** | 10 months of 36d, arithmetic, drifts against the seasons | Meritocratic founding, t = −2400y |
+| **Religious (bilunar)** | Moon months 30d, Tidemonths 360/7d, inside six 7-fold levels | Cosmic Nativity, t = 0 |
+| **Planetary days** | 7-day week, Chaldean order, ruler advances 3 places per day | t = 0 |
+
+The New Rational calendar is self-correcting by construction: the Sun moves 1°/day
+in a 360-day year, so ecliptic longitude *is* the day of the year
+(`new_rational_is_self_correcting`). At the reform instant the two calendars read
+Year 1 and Year 1601 — exactly 1600 years apart, which is the entire reason the
+reform happened (`calendar_handover_agrees_at_the_reform`).
+
+Three things the MUD delegates to its astrology handler, which we compute
+ourselves because we have the orbital elements:
+
+- **Moon phase** is real, not decorative: the true planetocentric angle between a
+  moon and the Sun as seen from its primary, so "New Moon" means what the MUD
+  means. Synodic months come out at 360/11 = 32.727d for Moon and 360/6 = 60.05d
+  for Tide (Earth is 29.5d for 11.97/year — the right shape).
+- **Planetary hour** uses each body's `state.ROTATION` to find its subsolar
+  longitude. The MUD has 12 variable daytime and 12 variable night hours sized
+  by real sunrise/sunset at an observer's latitude; our locations have no
+  latitude, so this uses 12 equal two-hour blocks. The Chaldean ruler sequence
+  and the 3-per-day drift are identical.
+- **Conjunctions** are solved, not asserted. Moon and Tide share a planetocentric
+  longitude every 360/|12−7| = 72 days.
+
+**One honest note on the MUD:** it claims its "great conjunction" recurs every 7
+years, because in 7 years Moon completes 84 cycles and Tide 49. That is true but
+not minimal — 12 Moon cycles and 7 Tide cycles are exactly one 360-day year, so
+the same configuration returns every year. We compute the real recurrence from
+the fixture's phases instead of repeating the claim.
+
+### Which clock actually moves
+
+The sim advances in **whole game-days**, so the MUD's formal 24-hour clock reads
+`00:00:00` forever (`clocks_read_midnight_on_whole_days`). The clock that does
+move is **local solar time**, derived from the world's own rotation: at t=0 the
+ship's world reads 14:04, and half a rotation later it is 12 hours different.
+That is what the UI leads with; both formal clocks are still shown, tabulated,
+because they are canonical.
+
+### Where it surfaces
+
+- **Header chip** and **Command Deck**: `1 Vermis, Year 801 · Monday · 14:04 @Tide`
+- **Calendar dialog** (Command Deck → Calendar): date, zodiac sign with its
+  element/mode/ruler/sect, local solar time, planetary hour, every moon's phase
+  with an illumination bar, next conjunction, the full religious register, the
+  Old Reckoning, and both clocks
+- **Selection card** for any moon: phase glyph, name, percent lit, synodic period
+- **Moon labels on the canvas** carry a phase glyph
+- **Quick jumps**: next New Moon / next Full Moon, solved from the live synodic
+  period
+
+Dates are derived, not stored, so they survive save/load for free — the calendar
+is a pure function of `t`.
+
 ## Tests
 
 The test suite uses only the Python standard library:
@@ -185,6 +254,7 @@ python3 tests/test_infra.py
 python3 tests/test_markets.py
 python3 tests/test_contacts.py
 python3 tests/test_server.py
+python3 tests/test_calendar.py  # calendar, clocks, moon phases, conjunctions
 python3 tests/test_page.py      # static gates for web/index.html
 ```
 

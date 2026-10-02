@@ -1,7 +1,8 @@
 """sim -> renderer contract v3: snapshot(t) the web canvas just draws.
 
 Shape:
-{v:3, t, credits, campaign:{captain,difficulty,name,company}, bodies:[{id,name,parent,kind,a,period,rotation_d,angle,x,y}],
+{v:3, t, credits, calendar:{...}, campaign:{captain,difficulty,name,company},
+ bodies:[{id,name,parent,kind,a,period,rotation_d,angle,x,y}],
  ships:[{id,name,at,loc,loc_to,leg,x,y,progress,eta_d,arc_pts,cargo,cargo_cap,dv,dv_cap}],
  ports:{port_id:{asks,bids,last}}, ledger:[...],
  locations:[{id,name,body,kind,depart_dv,arrive_dv,service,x,y,orbit_a,orbit_period,
@@ -21,6 +22,7 @@ from __future__ import annotations
 import math
 
 from . import orbits
+from .calendar import calendar as build_calendar
 from .state import Game, gate_state, orbit_geometry, rotation_period
 
 SNAPSHOT_VERSION = 3
@@ -166,6 +168,7 @@ def snapshot(game: Game) -> dict:
                           "orbit_angle": round(orbit_angle, 6),
                           "synchronous": loc["kind"] == "terminal"})
     return {"v": SNAPSHOT_VERSION, "t": round(game.t, 2), "credits": round(game.credits, 2),
+            "calendar": build_calendar(game.t, game),
             "campaign": {"captain": game.captain, "difficulty": game.difficulty,
                          "name": game.campaign, "company": game.company},
             "bodies": bodies, "ships": ships, "ports": ports, "ledger": ledger,

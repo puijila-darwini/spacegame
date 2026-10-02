@@ -246,8 +246,54 @@ scope: the anchor and the promise are real, the crossing is the next
 build. What earns inter-system travel is a freight market with a
 17-year Sol clock on the far side — not a menu item.
 
-## 25. Open decisions
+## 25. Timekeeping is the MUD's, ported losslessly (owner delta 2026-10-02)
 
+`sim/calendar.py` is `pthmud/world/timekeeping.py`, and the port is exact
+because a Sol year is 360 days — identical to the MUD's `GAME_YEAR / DAY_LENGTH`.
+The MUD counts `t` in game-*seconds*; we already count `t` in game-*days*, so
+this is the same calendar with the seconds divided out. That identity is the
+reason Moon is 30d (360/12) and Tide is 360/7d in `sim/orbits.py`, and it is
+pinned by `test_sol_year_is_360_days`.
+
+Two calendars ship (New Rational, astronomical and self-correcting; Old
+Rational, arithmetic and drifted), plus the bilunar religious register and the
+Chaldean planetary week. The Old Reckoning is not nostalgia: it is why the game
+can show a date two ways and have the 1600-year gap be meaningful.
+
+Three things we compute ourselves rather than delegate, because we have the
+orbital elements: moon phase (the true planetocentric Sun angle, so "New Moon"
+means what the MUD means), planetary hour (from each body's sidereal rotation),
+and conjunction times (solved, not asserted). The MUD's variable-length
+day/night hours need an observer latitude we do not model, so ours are 12 equal
+blocks — documented as a simplification rather than silently different.
+
+**Correction carried into the port.** The MUD says its great conjunction recurs
+every 7 years (84 Moon cycles, 49 Tide cycles). True but not minimal: 12 Moon
+cycles and 7 Tide cycles are exactly one 360-day year, so the configuration
+returns annually. We compute the recurrence (72 days for the Moon/Tide mutual
+conjunction) instead of repeating the claim.
+
+**A real consequence, not a detail:** the sim advances in whole days, so the
+MUD's formal 24-hour clock sits at midnight permanently. The clock that carries
+information is local solar time from the world's rotation. The UI leads with
+that and tabulates the formal ones.
+
+**Open, deliberately not invented:** nothing here has gameplay teeth yet. Moon
+phase and conjunction are surfaced as readouts only. Wiring tides to port
+throughput, or conjunction to a market event, is a design decision and belongs
+to the owner — see open decisions.
+
+## 26. Open decisions
+
+- **Should the calendar have teeth?** Moon phase (32.7d synodic for Moon) and
+  the 72-day Moon/Tide conjunction are real, derived, and currently readouts.
+  Candidate mechanics: tide-gated port throughput on Tide/Moon, conjunction as a
+  scheduled market event, or full-moon as a contract deadline multiplier. None
+  of these are built, deliberately — they change the economy.
+- **Campaign epoch.** The dates currently read Year 801 New / 2401 Old at t=0,
+  which is faithful to the MUD's Cosmic Nativity. An alternative is to anchor
+  each campaign at its own epoch and show only relative time. Faithful was
+  chosen; the two-reckoning display makes the history legible instead of odd.
 - Timescale: week-turns (pure strategy) vs real-time daemon (morning-check
   fantasy) — spec both, pick a sim default.
 - Python sim state schema + tick resolution (proposed: 1 day-game).
