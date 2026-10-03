@@ -140,18 +140,65 @@ def test_star_rejected():
         raise AssertionError(f"expected ValueError for {dest}")
 
 
-def test_fast_costs_more_and_meets_deadline():
+def _reachable_deadline(g, dest="arax"):
+    """A deadline between the soonest real arc and the window.
+
+    Real geometry cannot beat about 61% of the Hohmann transit at any fuel
+    price, so the old test's "50% of the way" deadline is now genuinely -- and
+    correctly -- unreachable.
+    """
+    slow = ships.plot(g, "pc1", dest)
+    opts = orbits.transfer_options(g.bodies, "tide", dest, g.t)
+    soonest = min(o["arrival_t"] for o in opts)
+    assert soonest < slow["arrival_t"], "no arc beats the window"
+    return slow, (slow["arrival_t"] + soonest) / 2.0
+
+
+def test_deadline_costs_more_and_meets_it():
     g = build_sol()
-    slow = ships.plot(g, "pc1", "arax")
-    deadline = g.t + 30.0 + slow["transit_d"] * 0.5  # tighter than the window, still reachable
+    slow, deadline = _reachable_deadline(g)
     assert deadline < slow["arrival_t"], "deadline must beat the windowed sailing"
     fast = ships.plot(g, "pc1", "arax", arrive_by=deadline)
-    assert fast["kind"] == "fast"
+    assert fast["kind"] == "hohmann", "a deadline arc is a real transfer, not a mode"
     assert fast["arrival_t"] <= deadline + 1e-6
-    assert fast["dv"] > slow["dv"], "leave-now must cost more than wait-cheap"
+    assert fast["dv"] > slow["dv"], "beating the window must cost more fuel"
 
 
-def test_fast_generous_deadline_uses_window():
+def test_deadline_picks_a_smaller_transfer_angle():
+    g = build_sol()
+    slow, deadline = _reachable_deadline(g)
+    fast = ships.plot(g, "pc1", "arax", arrive_by=deadline)
+    assert fast["theta"] < math.pi, "a tight deadline needs a shorter arc"
+
+
+def test_deadline_is_the_cheapest_arc_that_fits():
+    """The point of scanning instead of bisecting: several arcs can make a
+    deadline, and the player should pay for the cheapest of them."""
+    g = build_sol()
+    _slow, deadline = _reachable_deadline(g)
+    chosen = ships.plot(g, "pc1", "arax", arrive_by=deadline)
+    for deg in range(45, 181, 5):
+        try:
+            o = orbits._plan(g.bodies, "tide", "arax", g.t, math.radians(deg))
+        except Exception:
+            continue
+        if o["arrival_t"] <= deadline + 1e-6:
+            assert chosen["dv"] <= o["dv"] + 1e-9, deg
+
+
+def test_arrival_is_not_monotone_in_theta():
+    """The wait is phase-dependent, so a smaller theta is not always sooner.
+
+    This is why fast_option scans rather than bisects: from Tide at t=0 the
+    90-degree arc waits 46 days while the 120-degree one waits 412.
+    """
+    g = build_sol()
+    opts = {o["angle_deg"]: o for o in orbits.transfer_options(g.bodies, "tide", "arax", g.t)}
+    waits = [o["wait_d"] for o in opts.values()]
+    assert max(waits) - min(waits) > 100.0, "waits should vary sharply with theta"
+
+
+def test_generous_deadline_is_refused():
     g = build_sol()
     slow = ships.plot(g, "pc1", "arax")
     try:
@@ -161,8 +208,16 @@ def test_fast_generous_deadline_uses_window():
     raise AssertionError("expected ValueError (take the window)")
 
 
-def test_fast_impossible_deadline():
+def test_impossible_deadline_is_refused():
     g = build_sol()
+    # half the Hohmann transit: below the geometric floor for any arc
+    slow = ships.plot(g, "pc1", "arax")
+    try:
+        ships.plot(g, "pc1", "arax", arrive_by=g.t + slow["transit_d"] * 0.5)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError: no arc is that fast")
     try:
         ships.plot(g, "pc1", "arax", arrive_by=g.t + 1.0)
     except ValueError:
@@ -170,12 +225,10 @@ def test_fast_impossible_deadline():
     raise AssertionError("expected ValueError (unreachable)")
 
 
-def test_fast_ship_arrives_by_deadline():
+def test_deadline_ship_arrives_by_deadline():
     g = build_sol()
-    slow = ships.plot(g, "pc1", "arax")
-    deadline = g.t + 30.0 + slow["transit_d"] * 0.5
+    _slow, deadline = _reachable_deadline(g)
     leg = ships.commit(g, "pc1", "arax", arrive_by=deadline)
-    assert leg.kind == "fast"
     time.advance_to(g, leg.t_arrive)
     assert g.ships["pc1"].at == "arax"
     assert leg.t_arrive <= deadline + 1e-6
@@ -247,6 +300,94 @@ def test_kepler_inward():
     assert math.hypot(*q9) < math.hypot(*q0), "inward leg falls"
 
 
+def test_plot_lists_a_usable_ladder():
+    """Every advertised arc must be committable, not decorative."""
+    g = build_sol()
+    w = ships.plot(g, "pc1", "arax", with_options=True)
+    opts = w["options"]
+    assert len(opts) >= 4, opts
+    assert all(o["wait_d"] >= -1e-9 for o in opts), "an arc departs in the past"
+    assert all(o["transit_d"] > 0 for o in opts), "an arc takes no time"
+    assert all(o["total_dv"] > 0 for o in opts)
+    # the ladder is sorted soonest-arrival-first
+    arr = [o["arrival_t"] for o in opts]
+    assert arr == sorted(arr), arr
+    # and it includes the plain window as its cheapest member
+    cheap = min(opts, key=lambda o: o["total_dv"])
+    assert abs(cheap["theta"] - math.pi) < 1e-9, cheap["theta"]
+
+
+def test_tighter_arc_actually_departs_sooner():
+    """The whole point: a smaller angle must not wait longer than the window."""
+    g = build_sol()
+    opts = ships.plot(g, "pc1", "arax", with_options=True)["options"]
+    window = [o for o in opts if abs(o["theta"] - math.pi) < 1e-9][0]
+    tight = [o for o in opts if o["angle_deg"] <= 105]
+    assert tight, "ladder has no tighter arcs"
+    assert all(o["arrival_t"] < window["arrival_t"] for o in tight)
+    assert all(o["cruise_dv"] > window["cruise_dv"] for o in tight)
+
+
+def test_commit_with_theta_stores_the_arc():
+    g = build_sol()
+    leg = ships.commit(g, "pc1", "arax", theta=math.radians(120))
+    assert leg.kind == "hohmann"
+    assert abs(leg.theta - math.radians(120)) < 1e-9
+    assert leg.nu1 != 0.0 or leg.p > 0.0, "arc geometry not recorded"
+    # the rendered polyline must reach both planets
+    pts = api.arc_points(leg)
+    assert len(pts) == 26
+    assert abs(math.hypot(*pts[0]) - leg.a1) < 1e-3, pts[0]
+    assert abs(math.hypot(*pts[-1]) - leg.a2) < 1e-3, pts[-1]
+
+
+def test_committed_arc_advances_the_ship_along_its_ellipse():
+    """A non-Hohmann arc must still move monotonically and be time-consistent."""
+    g = build_sol()
+    leg = ships.commit(g, "pc1", "arax", theta=math.radians(105))
+    B = g.bodies
+    prev_r = None
+    for i in range(11):
+        f = i / 10
+        t = leg.t_depart + f * (leg.t_arrive - leg.t_depart)
+        x, y = api.transfer_pos(leg, B, t)
+        r = math.hypot(x, y)
+        if prev_r is not None:
+            assert r > prev_r - 1e-9, f"outward arc fell at f={f}"
+        prev_r = r
+    time.advance_to(g, leg.t_arrive)
+    assert g.ships["pc1"].at == "arax"
+
+
+def test_hop_legs_collapse_to_one_option():
+    """A moon-to-moon hop has no transfer angle -- both share one helio radius.
+
+    Before deduplication the planner offered eight identical rows for a hop.
+    """
+    g = build_sol()
+    g.ships["pc1"].at, g.ships["pc1"].loc = "tide", "tide-surface"
+    w = ships.plot(g, "pc1", "moon", with_options=True)
+    assert w["kind"] == "hop"
+    assert len(w["options"]) == 1, [(o["angle_deg"], o["wait_d"]) for o in w["options"]]
+    assert w["options"][0]["kind"] == "hop"
+
+
+def test_every_arc_option_carries_its_own_summary():
+    """The planner renders the SELECTED ARC's summary line.
+
+    Summaries used to be built only for the top-level plan, so every option in
+    the menu came back without one and the UI drew the literal string
+    "undefined" under the list.
+    """
+    g = build_sol()
+    w = ships.plot(g, "pc1", "arax", with_options=True)
+    for o in w["options"]:
+        assert isinstance(o.get("summary"), str) and o["summary"], o["angle_deg"]
+        assert "undefined" not in o["summary"]
+        # and the line names the arc the player picked, not the default window
+        assert f"{o['angle_deg']:.0f}deg" in o["summary"], o["summary"]
+
+
 if __name__ == "__main__":
     tests = [
         ("periods", test_periods),
@@ -260,16 +401,27 @@ if __name__ == "__main__":
         ("save_roundtrip", test_save_roundtrip),
         ("snapshot_contract", test_snapshot_contract),
         ("star_rejected", test_star_rejected),
-        ("fast_premium", test_fast_costs_more_and_meets_deadline),
-        ("fast_window_guard", test_fast_generous_deadline_uses_window),
-        ("fast_impossible", test_fast_impossible_deadline),
-        ("fast_arrives", test_fast_ship_arrives_by_deadline),
+        ("deadline_costs_more", test_deadline_costs_more_and_meets_it),
+        ("deadline_smaller_theta", test_deadline_picks_a_smaller_transfer_angle),
+        ("deadline_cheapest_fit", test_deadline_is_the_cheapest_arc_that_fits),
+        ("theta_wait_not_monotone", test_arrival_is_not_monotone_in_theta),
+        ("deadline_generous_refused", test_generous_deadline_is_refused),
+        ("deadline_impossible_refused", test_impossible_deadline_is_refused),
+        ("deadline_ship_arrives", test_deadline_ship_arrives_by_deadline),
         ("ledger_arrival", test_ledger_records_arrival),
         ("catchup_equivalence", test_catchup_equivalence),
         ("catchup_cap", test_catchup_cap),
+        ("ladder_usable", test_plot_lists_a_usable_ladder),
+        ("tighter_departs_sooner", test_tighter_arc_actually_departs_sooner),
+        ("commit_stores_arc", test_commit_with_theta_stores_the_arc),
+        ("committed_arc_advances", test_committed_arc_advances_the_ship_along_its_ellipse),
+        ("hop_one_option", test_hop_legs_collapse_to_one_option),
+        ("options_have_summaries", test_every_arc_option_carries_its_own_summary),
         ("kepler_outward", test_kepler_outward),
         ("kepler_inward", test_kepler_inward),
     ]
-    ok = all(check(n, f) for n, f in tests)
+    # NOT all(): it short-circuits and hides failures after the first.
+    results = [check(n, f) for n, f in tests]
+    ok = all(results)
     print(f"\n{len(PASS)}/{len(tests)} passed")
     sys.exit(0 if ok else 1)

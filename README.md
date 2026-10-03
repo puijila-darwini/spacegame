@@ -2,7 +2,7 @@
 
 A slow interstellar trading game: place capital, wait weeks, and find out what happened.
 
-The simulation is written in Python with no third-party runtime dependencies. It models circular, coplanar Keplerian orbits, phase-gated Hohmann transfers, local ports with actual counterparties, slow capital allocation, and event-driven markets.
+The simulation is written in Python with no third-party runtime dependencies. It models circular, coplanar Keplerian orbits, phase-gated Lambert transfers (a real choice of transfer angle, not just the Hohmann minimum), local ports with actual counterparties, slow capital allocation, and event-driven markets.
 
 ## Run the web interface
 
@@ -95,12 +95,69 @@ beyond Fulmaior's 9.43, with a time-driven lifecycle: `sealed` → `stabilising`
 (within 120d of opening) → `open` at t=400d, ~1.1 Tern years. The overview
 draws it as two counter-rotating rings rather than a disc.
 
-**Transit is deliberately not wired up.** `orbits` refuses the gate in both
-`next_window` and `fast_option`, and the selection card says so, because there
+**Transit is deliberately not wired up.** `orbits` refuses the gate in every
+plan (`next_window`, `transfer_options`, `fast_option`), and the selection card
+says so, because there
 is no delta-v budget or wait time that would buy a crossing. The far side is
 fixture data only — `state.build_alpha_phocae()` (hot inner world, temperate
 middle, cold outer, one moon) so the shape of a second system is already
 decided. Wiring the crossing is the next step, not this one.
+
+### Transfers: real geometry, not just the Hohmann window
+
+`sim/lambert.py` solves the two-impulse transfer problem between coplanar
+circular orbits. A transfer is set by `r1`, `r2` and a **transfer angle**
+`theta` — the phase gap the departure accepts:
+
+    e = (r2 - r1) / (r1 cos nu1 - r2 cos(nu1 + theta))
+    p = r1 (1 + e cos nu1)              a = p / (1 - e^2)
+
+Given the two radii and `theta` that leaves a one-parameter family (`nu1`), so
+the planner prices the **minimum-delta-v** member, found by grid plus
+golden-section refinement and cached per `(r_lo, r_hi, theta)`.
+
+- `theta = pi` is the classic Hohmann transfer, and it is reproduced exactly —
+  `tests/test_lambert.py` pins delta-v and time-of-flight to `1e-9` against
+  `orbits.hohmann` for seven radius pairs, inward included.
+- A smaller `theta` accepts less phase. It covers the distance sooner **and**
+  the pair reaches that phase sooner, so both the wait and the transit shrink —
+  at higher fuel.
+- Delta-v is the magnitude of the velocity **vector** difference at each end,
+  not a difference of speeds. That distinction matters: it is only equivalent
+  when the arrival is at an apsis, and using speeds makes non-apsis arcs look
+  impossibly cheap.
+- An inward transfer is the same ellipse **rotated by pi and flown prograde**,
+  not the outward arc reversed — reversing it would be a retrograde flight.
+- Departures stay **phase-gated at every angle**. A tighter arc shortens the
+  cycle; it never lets you leave immediately.
+
+`fast_option` (deadline sailing) no longer charges an invented
+`1 + (t_hohmann/t)^2` premium. It scans a fine angle ladder and picks the
+cheapest arc that makes the deadline, and still refuses when the plain window
+already would — paying for speed you did not need is the mistake it exists to
+prevent. It *scans* rather than bisects because arrival time is **not monotone**
+in `theta`: the wait depends on where the pair currently sits in its cycle.
+
+Measured trade, Tern → Arax from Tide at t=0:
+
+| theta | wait | transit | arrives | total dv | |
+|---|---|---|---|---|---|
+| 180° | 374d | 992d | t=1366 | 0.0335 | the window, cheapest fuel |
+| 150° | 390d | 807d | t=1197 | 0.0347 | |
+| 120° | 412d | 686d | t=1097 | 0.0378 | |
+| 105° | 32d | 648d | t=679 | 0.0400 | **half the time for +19% fuel** |
+| 90° | 46d | 622d | t=668 | 0.0425 | soonest |
+
+Transit time bottoms out near `theta = 70°` and rises again below it, so ~90°
+is about the knee. Because climb and descent (0.084 dv) dwarf cruise
+(0.0085 dv), the *total* cost of going faster is small — which is correct for a
+merchant game: fuel is cheap and refuellable, while capital and market risk are
+what you are actually spending.
+
+The **Flight Planner** lists the whole ladder, sorted soonest-arrival-first, with
+`SOONEST` / `CHEAPEST` / `WINDOW` badges. Selecting a row sends that `theta` on
+commit, and the rendered polyline is the real ellipse sampled uniformly in
+time (so the ship visibly crawls at apoapsis).
 
 ### Zooming, labels, and the selection schematic
 
@@ -321,6 +378,7 @@ is a pure function of `t`.
 The test suite uses only the Python standard library:
 
 ```sh
+python3 tests/test_lambert.py   # transfer geometry: Hohmann back-compat, the trade curve
 python3 tests/test_movement.py
 python3 tests/test_infra.py
 python3 tests/test_markets.py
@@ -338,7 +396,15 @@ script, and a `getElementById` cross-check against the markup. It also pins the
 renderer invariants as static assertions — labels go through the single placement
 pass, the halo uses the theme background rather than ink, the zoom rate carries no
 level-snapping, markers are not `√zoom`-sized, and `MAX_ZOOM` still frames the
-deepest moon system.
+deepest moon system, and that the arc menu and its destination dropdown cannot
+disagree.
+
+`test_lambert.py` carries the load-bearing guarantee of the whole movement
+system: `theta = pi` must reproduce the original Hohmann transfer exactly, or
+every other movement test is quietly exercising a different orbit. It also pins
+the properties the trade depends on — Hohmann is globally cheapest, smaller
+`theta` is never slower and never cheaper, transit time has a floor, and an
+inward arc is the ellipse rotated by pi rather than reversed.
 
 ## Design
 

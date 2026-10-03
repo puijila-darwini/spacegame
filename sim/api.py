@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import math
 
-from . import orbits
+from . import lambert, orbits
 from .calendar import calendar as build_calendar
 from .state import Game, gate_state, orbit_geometry, rotation_period
 
@@ -50,27 +50,29 @@ def _kepler_E(M: float, e: float) -> float:
     return E
 
 
-def _transfer_polar(leg, f: float) -> tuple[float, float]:
-    """Orbital position at fraction f along a Hohmann transfer.
+def leg_arc(leg) -> dict:
+    """Rebuild the Lambert arc dict from a stored Leg, for position solving."""
+    if leg.kind != "hohmann" or leg.a_trans <= 0:
+        return {}
+    return {"e": leg.e, "a": leg.a_trans, "p": leg.p or leg.a_trans * (1.0 - leg.e * leg.e),
+            "nu1": leg.nu1, "theta": leg.theta, "tof": 0.0,
+            "m0": leg.m0, "dm": leg.dm, "mu": orbits.MU_SUN,
+            "r_lo": min(leg.a1, leg.a2), "r_hi": max(leg.a1, leg.a2),
+            "periapsis": leg.periapsis, "apoapsis": leg.apoapsis}
 
-    Uses Kepler's equation to solve for eccentric anomaly E from mean anomaly M,
-    then converts to true anomaly nu via the standard two-body formula. The orbit
-    sweeps equal area in equal time: slower at aphelion (outer system), faster at
-    perihelion (inner system). Correctly handles both outward and inward legs.
+
+def _transfer_polar(leg, f: float) -> tuple[float, float]:
+    """Orbital position at fraction f along the transfer: (radius, longitude).
+
+    Generalises to any two-impulse arc. The old implementation assumed a
+    Hohmann half-ellipse with periapsis at r1 (outward) or apoapsis at r2
+    (inward) and branched on the sign of e; now the arc carries its own departure
+    true anomaly and swept angle, so inward, outward and overshoot arcs all fall
+    out of one formula.
     """
-    e_abs = abs(leg.e)
-    f = min(max(f, 0.0), 1.0)
-    # Outward legs run perihelion -> aphelion. Inward legs traverse the same
-    # ellipse in reverse, aphelion -> perihelion, so solve Kepler backwards
-    # from the next perihelion rather than starting a second forward orbit.
-    M = math.pi * (f if leg.e >= 0 else 1.0 - f)
-    E = M + e_abs * math.sin(M)
-    for _ in range(8):
-        E -= (E - e_abs * math.sin(E) - M) / (1 - e_abs * math.cos(E))
-    nu = 2 * math.atan2(math.sqrt(1 + e_abs) * math.sin(E / 2),
-                        math.sqrt(1 - e_abs) * math.cos(E / 2))
-    r = leg.a_trans * (1 - e_abs * math.cos(E))
-    return (r, leg.th0 + nu)
+    arc = leg_arc(leg)
+    r, dlon = lambert.position(arc, f, outward=leg.a1 < leg.a2)
+    return r, leg.th0 + dlon
 
 
 def transfer_pos(leg, bodies: dict, t: float) -> tuple[float, float]:
@@ -83,15 +85,16 @@ def transfer_pos(leg, bodies: dict, t: float) -> tuple[float, float]:
     span = max(leg.t_arrive - leg.t_depart, 1e-9)
     f = min(max((t - leg.t_depart) / span, 0.0), 1.0)
     r, ang = _transfer_polar(leg, f)
-    return (r * math.cos(ang), r * math.sin(ang))
+    return r * math.cos(ang), r * math.sin(ang)
 
 
 def arc_points(leg, n: int = 25) -> list:
+    """Polyline for the renderer. Uniform in TIME, so dots bunch at apoapsis."""
     if leg.kind != "hohmann" or abs(leg.a1 - leg.a2) < 1e-12 or leg.a_trans <= 0:
         return []
     pts = []
     for i in range(n + 1):
-        r, ang = _transfer_polar(leg, i / n)  # time-uniform: dots bunch at aphelion
+        r, ang = _transfer_polar(leg, i / n)
         pts.append([round(r * math.cos(ang), 4), round(r * math.sin(ang), 4)])
     return pts
 

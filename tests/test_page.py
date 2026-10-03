@@ -260,6 +260,63 @@ def test_canvas_matches_display_resolution():
     assert "ctx.setTransform(PX, 0, 0, PX, 0, 0)" in script, "PX transform not applied in draw()"
 
 
+def test_planner_offers_a_real_arc_menu():
+    """The flight planner must offer every transfer angle, not just the window."""
+    _html, script = script_and_markup()
+    assert "function routeMenuHTML()" in script, "arc menu renderer missing"
+    assert "with_options" in script, "plot request does not ask for the ladder"
+    assert "r.options" in script, "planner discards the server's arc list"
+    # each row is selectable and shows the three numbers a decision needs
+    assert "wait " in script and "fly " in script and "arrive t=" in script
+    assert "data-arc" in script, "arc rows are not clickable"
+    assert "ROUTE_SEL" in script
+
+
+def test_commit_sends_the_chosen_arc():
+    """Choosing a row must change the committed flight, not just the preview."""
+    _html, script = script_and_markup()
+    assert "theta: (isNaN(by) && arc) ? arc.theta : null" in script, \
+        "commit does not pass the selected transfer angle"
+    # a deadline is resolved server-side, so it must NOT also send a theta
+    assert "isNaN(by) && arc" in script
+
+
+def test_arc_menu_is_explained_to_the_player():
+    """A row of degrees means nothing unless the window relationship is stated."""
+    _html, script = script_and_markup()
+    assert "EVERY ARC IS REAL GEOMETRY" in script, "arc menu is unexplained"
+    assert "phase-gated" in script, "does not warn that departures stay gated"
+    assert "WINDOW" in script and "CHEAPEST" in script and "SOONEST" in script
+
+
+def test_arc_menu_and_destination_dropdown_agree():
+    """The dropdown must not describe a different world than the arc list.
+
+    destOptions() defaults to whatever the player last clicked on the map, so a
+    re-render after selecting an arc reset the select while ROUTES still held
+    the previous destination -- the menu and the select disagreed.
+    """
+    _html, script = script_and_markup()
+    assert "ROUTE_DEST" in script, "chosen destination is not remembered"
+    assert "const want = ROUTE_DEST || selected;" in script, \
+        "dropdown does not remember the chosen destination"
+    assert "ROUTE_DEST = document.getElementById(\"c-dest\").value;" in script, \
+        "picking a destination does not stick across the re-render"
+    assert 'onChange("c-dest"' in script, "changing the destination leaves a stale arc list"
+    # `on` only ever assigned onclick, so a <select> bound through it fired on
+    # CLICK (opening the dropdown) and never on an actual choice.
+    assert "const onChange = (id, fn)" in script, "no change-listener helper exists"
+    assert "el.onclick = fn; };" in script and "el.onchange = fn; };" in script
+
+
+def test_summary_is_not_duplicated():
+    """The selected arc's line is shown once -- PREVIEW owns it, not the menu."""
+    _html, script = script_and_markup()
+    menu = script[script.index("function routeMenuHTML()"):script.index("function routeComparisonHTML()")]
+    assert "esc(sel.summary)" not in menu, "menu duplicates the PREVIEW line"
+    assert 'class="preview"' not in menu, "menu renders a second preview box"
+
+
 if __name__ == "__main__":
     tests = [
         ("script_parses", test_script_parses),
@@ -273,7 +330,14 @@ if __name__ == "__main__":
         ("label_leaders", test_detached_labels_get_leaders),
         ("markers_scale", test_markers_scale_below_their_world),
         ("canvas_resolution", test_canvas_matches_display_resolution),
+        ("arc_menu", test_planner_offers_a_real_arc_menu),
+        ("commit_arc", test_commit_sends_the_chosen_arc),
+        ("arc_menu_copy", test_arc_menu_is_explained_to_the_player),
+        ("menu_matches_dropdown", test_arc_menu_and_destination_dropdown_agree),
+        ("summary_once", test_summary_is_not_duplicated),
     ]
-    ok = all(check(n, f) for n, f in tests)
+    # NOT all(): it short-circuits and hides every failure after the first.
+    results = [check(n, f) for n, f in tests]
+    ok = all(results)
     print(f"\n{len(PASS)}/{len(tests)} passed")
     sys.exit(0 if ok else 1)

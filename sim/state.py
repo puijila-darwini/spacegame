@@ -63,14 +63,25 @@ class Leg:
     dest: str
     t_depart: float
     t_arrive: float
-    kind: str  # 'hohmann' | 'hop' (same-helio moon hop) | 'fast' (leave-now premium)
+    kind: str  # 'hohmann' (any Lambert arc) | 'hop' (same-helio moon hop)
     a1: float = 0.0
     a2: float = 0.0
     a_trans: float = 0.0
-    e: float = 0.0  # signed: (a2-a1)/(a1+a2)
+    e: float = 0.0  # transfer ellipse eccentricity, always >= 0
     th0: float = 0.0  # helio departure longitude, radians
     origin_loc: str | None = None
     dest_loc: str | None = None
+    # Lambert arc state. `nu1` is the departure true anomaly ON the transfer
+    # ellipse and `theta` the swept transfer angle; with p/dm they describe any
+    # two-impulse transfer, not just a Hohmann half-ellipse. theta = pi
+    # reproduces the original behaviour exactly.
+    theta: float = 0.0
+    nu1: float = 0.0
+    p: float = 0.0
+    dm: float = 0.0
+    m0: float = 0.0
+    periapsis: float = 0.0
+    apoapsis: float = 0.0
 
 
 @dataclass

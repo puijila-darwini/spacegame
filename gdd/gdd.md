@@ -168,10 +168,44 @@ any renderer (web-canvas single-file or pygame) just draws.
 ## 20. Orbits and windows (owner delta 2026-09-10)
 
 Keplerian-lite, NOT fully fake: circular coplanar orbits, real periods
-(`n = sqrt(mu/a^3)`, `angle = angle0 + n·t`), analytic Hohmann arcs
-(`t = π√((a1+a2)³/8μ)`), phase-gated departures. Waiting is a capital
-decision; off-window fast transfers allowed at steep premium. Edge
-contract: `next_window(t), wait, hohmann_dv/time, fast_dv(t)`.
+(`n = sqrt(mu/a^3)`, `angle = angle0 + n·t`), **real two-impulse Lambert
+transfers parameterised by transfer angle θ** (`sim/lambert.py`), phase-gated
+departures at every angle.
+
+SUPERSEDED 2026-10-03: this originally specified analytic Hohmann arcs only
+(`t = π√((a1+a2)³/8μ)`) with "off-window fast transfers allowed at steep
+premium" — i.e. one trajectory plus an invented surcharge. The premium was
+replaced by real geometry: a departure is offered across a ladder of transfer
+angles, each priced by its own minimum-Δv ellipse. θ=π is the Hohmann transfer
+and is reproduced exactly (back-compatible to 1e-9).
+
+Two facts that emerged and are now load-bearing:
+
+1. **Departures stay phase-gated at every θ.** A tighter arc shortens the
+   cycle; it never lets you leave immediately. "Wait or go" became one dial
+   rather than two mechanics.
+2. **Arrival time is not monotone in θ**, because the wait depends on where the
+   pair currently sits in its cycle. Deadline resolution therefore scans the
+   ladder instead of bisecting it.
+
+Also settled by measurement: Δv is the magnitude of the velocity **vector**
+difference at each end, not a difference of speeds (equivalent only at an
+apsis — using speeds makes non-apsis arcs look impossibly cheap, and briefly
+produced a 160° arc that was both faster and cheaper than Hohmann, which the
+minimum-Δv theorem forbids).
+
+Edge contract: `next_window(t)` (θ=π, cheapest), `transfer_options(...)` (the
+ladder, sorted soonest-arrival-first), `fast_option(t, arrive_by)` (cheapest arc
+that meets a deadline; refuses when the window already would).
+
+**Open balance question for the owner.** Because climb and descent (~0.084 dv)
+dwarf cruise (~0.0085 dv), going Tern→Arax half as fast again costs only ~10%
+more *total* fuel. So the fuel dial barely bites and time becomes nearly free —
+which inverts the original "waiting is a capital decision" intent. Options, none
+taken unilaterally: raise cruise Δv so arcs are expensive; make infrastructure
+scarcer (fewer elevators) so it dominates less; or accept it, on the argument
+that in a merchant game the currency being spent is tied-up capital and market
+risk, not propellant.
 
 ## 21. Names (owner delta 2026-09-10)
 
@@ -315,6 +349,10 @@ Design rules that came out of actually playing it:
   which is faithful to the MUD's Cosmic Nativity. An alternative is to anchor
   each campaign at its own epoch and show only relative time. Faithful was
   chosen; the two-reckoning display makes the history legible instead of odd.
+- **Does the arc menu need a fuel rebalance?** See §20. Real geometry made
+  faster arcs cheap in *total* terms (10% more fuel for 37% less time on
+  Tern→Arax), so the time-for-fuel trade is much softer than intended. Left as
+  an owner call.
 - Timescale: week-turns (pure strategy) vs real-time daemon (morning-check
   fantasy) — spec both, pick a sim default.
 - Python sim state schema + tick resolution (proposed: 1 day-game).

@@ -134,6 +134,15 @@
   .ledger .lt{color:var(--mut); font-size:11px; margin-right:6px}
   .foot{padding:0 22px 26px; color:var(--mut); font-size:12px}
   .rowline{display:flex; justify-content:space-between; align-items:center; gap:8px; padding:2px 0}
+  /* arc menu rows: straw-edged, royal when chosen, matching the card language */
+  .arc{cursor:pointer; padding:4px 7px; margin:2px 0; border:1px solid transparent;
+       border-left:3px solid rgba(242,230,166,.35); border-radius:2px;
+       transition:background .12s, border-color .12s}
+  .arc:hover{background:rgba(107,63,160,.14); border-left-color:var(--straw,#F2E6A6)}
+  .arc.sel{background:rgba(107,63,160,.26); border-color:rgba(107,63,160,.75);
+           border-left:3px solid #6B3FA0}
+  .arc.sel .cname{color:#F2E6A6}
+  .arc .badge{margin-left:6px}
   .cname{font-weight:600}
   .dim{opacity:.55}
   .ctl{display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin:6px 0}
@@ -429,6 +438,9 @@
 <script>
 "use strict";
 let SNAP = null, LIVE = false, PREVIEW = "", QUOTE = "", AUTO_ENABLED = false;
+// Flight-planner arc menu. ROUTES is every real transfer angle on the ladder,
+// already sorted soonest-arrival-first by the sim; ROUTE_SEL indexes into it.
+let ROUTES = [], ROUTE_SEL = -1, ROUTE_DEST = null;
 // `body`/`ship`/`port`/`location` are the derived camera + panel context.
 // `focus` is what the player actually pointed at — the readout card shows
 // that, and it is the only way to tell "clicked the ship" from "clicked the
@@ -1586,12 +1598,17 @@ function draw(){
 }
 
 function destOptions(cur, selected){
+  // ROUTE_DEST is the world the player chose in this dropdown. It must win over
+  // `selected` (whatever was last clicked on the map): the panel is rebuilt on
+  // every render, so without it picking a destination silently snapped the
+  // select back to the map selection while the arc list described another one.
+  const want = ROUTE_DEST || selected;
   return SNAP.bodies.filter(b => b.id !== "sun" && b.id !== cur)
     .map(b => {
       const label = b.kind === "wormhole"
         ? `${b.name || b.id} (gate — no transit yet)`
         : b.id[0].toUpperCase() + b.id.slice(1);
-      return `<option value="${b.id}"${b.id === selected ? " selected" : ""}>${esc(label)}</option>`;
+      return `<option value="${b.id}"${b.id === want ? " selected" : ""}>${esc(label)}</option>`;
     }).join("");
 }
 function locOptions(body, selected){
@@ -2000,6 +2017,40 @@ function settingsPanel(){
     <div class="ctl"><button class="hud-button" id="settings-save">Save campaign</button><button class="hud-button" id="settings-load">Load campaign</button></div>
     <div class="ctl"><button class="hud-button" id="settings-reset">Reset campaign</button><label class="hud-button" for="file">Load snapshot</label></div>`;
 }
+function wireArcMenu(){
+  const el = document.getElementById("route-menu");
+  if(!el) return;
+  el.onclick = ev => {
+    const row = ev.target.closest("[data-arc]");
+    if(!row) return;
+    const i = parseInt(row.getAttribute("data-arc"), 10);
+    if(!(i >= 0 && i < ROUTES.length)) return;
+    ROUTE_SEL = i;
+    PREVIEW = ROUTES[i].summary;
+    render();
+  };
+}
+
+function routeMenuHTML(){
+  if(!ROUTES.length) return "";
+  const cheapest = ROUTES.reduce((a,b) => b.total_dv < a.total_dv ? b : a, ROUTES[0]);
+  const rows = ROUTES.map((o, i) => {
+    const marks = [];
+    if(i === 0) marks.push("SOONEST");
+    if(o === cheapest && i !== 0) marks.push("CHEAPEST");
+    if(o.angle_deg === 180) marks.push("WINDOW");
+    return `<div class="rowline arc${i === ROUTE_SEL ? " sel" : ""}" data-arc="${i}">
+      <span><span class="cname">${o.angle_deg.toFixed(0)}&deg; arc</span>
+        ${marks.map(m => `<span class="badge royal">${m}</span>`).join(" ")}</span>
+      <span class="tape">wait ${o.wait_d.toFixed(0)}d &middot; fly ${o.transit_d.toFixed(0)}d
+        &middot; arrive t=${o.arrival_t.toFixed(0)} &middot; ${o.total_dv.toFixed(4)} dv</span></div>`;
+  }).join("");
+  return `<div class="mini" style="margin-top:8px">EVERY ARC IS REAL GEOMETRY &mdash; PICK YOUR TRANSFER ANGLE.
+    Departures stay phase-gated at all of them; a tighter arc waits less, flies
+    less, and burns more. 180&deg; is the cheapest (the classic window).</div>
+    ${rows}`;
+}
+
 function routeComparisonHTML(){
   if(!ROUTE_COMPARISON.length) return "";
   return `<div class="tape" style="margin-top:10px">ROUTE COMPARISON</div><table class="book"><tr><th>world</th><th>wait</th><th>transit</th><th>total dv</th></tr>${ROUTE_COMPARISON.map(r => `<tr data-compare-dest="${esc(r.dest)}" style="cursor:pointer"><td>${esc(r.dest)}</td><td>${r.wait.toFixed(1)}d</td><td>${r.transit.toFixed(1)}d</td><td>${r.total.toFixed(3)}</td></tr>`).join("")}</table>`;
@@ -2019,7 +2070,8 @@ async function compareRoutes(){
   ROUTE_COMPARISON = results.filter(Boolean).sort((a, b) => (a.wait + a.transit) - (b.wait + b.transit));
   render();
   document.querySelectorAll("[data-compare-dest]").forEach(row => row.onclick = () => {
-    document.getElementById("c-dest").value = row.dataset.compareDest;
+    ROUTE_DEST = row.dataset.compareDest;
+    document.getElementById("c-dest").value = ROUTE_DEST;
     render();
   });
 }
@@ -2034,6 +2086,7 @@ function flightPanel(){
       <label class="mini" for="c-by">arrive by (optional)</label><input type="number" id="c-by" placeholder="t = …" style="width:110px"></div>
     <div class="ctl"><button class="hud-button" id="c-prev">Preview route</button><button class="hud-button" id="c-go">Commit flight</button><button class="hud-button" id="compare-routes">Compare routes</button></div>
     <div id="route-comparison">${routeComparisonHTML()}</div>
+    <div id="route-menu">${routeMenuHTML()}</div>
     ${PREVIEW ? `<div class="preview">${esc(PREVIEW)}</div>` : ""}`;
 }
 function reportPanel(){
@@ -2419,11 +2472,17 @@ function orbitPayload(ship, dest){
   const by = parseFloat(document.getElementById("c-by").value);
   return {ship:ship.id, dest,
     dest_loc: document.getElementById("c-surf").checked ? dest + "-surface" : null,
-    arrive_by: isNaN(by) ? null : by};
+    arrive_by: isNaN(by) ? null : by, with_options: true};
 }
 async function plotOrbit(ship, dest){
   const r = await act("plot", orbitPayload(ship, dest));
-  if(r) PREVIEW = r.summary;
+  if(r){
+    // A deadline picks its own arc server-side, so no menu to offer.
+    ROUTES = r.options || [];
+    ROUTE_SEL = ROUTES.length ? 0 : -1;
+    ROUTE_DEST = dest;
+    PREVIEW = ROUTES.length ? ROUTES[ROUTE_SEL].summary : r.summary;
+  }
   render();
 }
 
@@ -2435,10 +2494,21 @@ function marketQuote(portId, comm, side){
 }
 function wireLive(){
   if(!LIVE) return;
+  wireArcMenu();
   const on = (id, fn) => { const el = document.getElementById(id); if(el) el.onclick = fn; };
+  // Selects need a change listener. Reusing `on` bound them to CLICK, which
+  // fires when the dropdown opens -- before any destination is picked.
+  const onChange = (id, fn) => { const el = document.getElementById(id); if(el) el.onchange = fn; };
   const ship = SNAP.ships.find(x => x.id === sel.ship) || SNAP.ships[0];
   on("flight-advance", nextEvent);
   on("compare-routes", compareRoutes);
+  // Changing the destination invalidates the arc list, but the CHOICE itself is
+  // remembered so the rebuilt dropdown keeps showing it.
+  onChange("c-dest", () => {
+    ROUTE_DEST = document.getElementById("c-dest").value;
+    ROUTES = []; ROUTE_SEL = -1; PREVIEW = "";
+    render();
+  });
   on("c-prev", () => plotOrbit(ship, document.getElementById("c-dest").value));
   on("c-plan-target", () => {
     if(sel.body && sel.body !== "sun" && sel.body !== ship.at)
@@ -2447,11 +2517,15 @@ function wireLive(){
   on("c-go", async () => {
     const dest = document.getElementById("c-dest").value;
     const by = parseFloat(document.getElementById("c-by").value);
-    if(!confirm(`Commit flight to ${dest}? This spends delta-v and starts the voyage.`)) return;
-    PREVIEW = "";
+    const arc = ROUTES[ROUTE_SEL];
+    const what = arc ? `${arc.angle_deg.toFixed(0)}-degree arc, arriving t=${arc.arrival_t.toFixed(0)}`
+                     : "the windowed sailing";
+    if(!confirm(`Commit flight to ${dest} on ${what}? This spends delta-v and starts the voyage.`)) return;
+    PREVIEW = ""; ROUTES = []; ROUTE_SEL = -1; ROUTE_DEST = null;
     await act("commit", {ship: ship.id, dest,
       dest_loc: document.getElementById("c-surf").checked ? dest + "-surface" : null,
-      arrive_by: isNaN(by) ? null : by});
+      arrive_by: isNaN(by) ? null : by,
+      theta: (isNaN(by) && arc) ? arc.theta : null});
   });
   on("c-transfer", async () => {
     await act("transfer", {ship: ship.id, loc: document.getElementById("c-loc").value});
@@ -2539,7 +2613,7 @@ function render(){
       const commodity = document.getElementById("c-comm");
       if(commodity) commodity.value = row.dataset.opportunityComm;
       const destination = document.getElementById("c-dest");
-      if(destination) destination.value = row.dataset.opportunityDest;
+      if(destination){ ROUTE_DEST = row.dataset.opportunityDest; destination.value = ROUTE_DEST; }
     };
   });
   document.querySelectorAll("[data-report-open]").forEach(button => {

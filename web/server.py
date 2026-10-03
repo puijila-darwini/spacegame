@@ -218,14 +218,15 @@ class Store:
                 return {"reports": reports}
             if name == "plot":
                 return ships.plot(g, p["ship"], p["dest"], p.get("dest_loc"),
-                                  None, p.get("arrive_by"))
+                                  None, p.get("arrive_by"), p.get("theta"),
+                                  bool(p.get("with_options")))
             if name == "commit":
                 leg = ships.commit(g, p["ship"], p["dest"], p.get("dest_loc"),
-                                   None, p.get("arrive_by"))
+                                   None, p.get("arrive_by"), p.get("theta"))
                 self._save()
                 return {"leg": {"from": leg.origin, "to": leg.dest,
                                 "depart": leg.t_depart, "arrive": leg.t_arrive,
-                                "kind": leg.kind}}
+                                "kind": leg.kind, "theta": leg.theta}}
             if name == "buy":
                 res = markets.buy(g, p["ship"], p["comm"], float(p.get("qty", 1)))
                 self._save()
