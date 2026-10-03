@@ -78,6 +78,11 @@
   .sel-grid dt{color:var(--mut); font-size:11px; letter-spacing:1px; text-transform:uppercase; white-space:nowrap}
   .sel-grid dd{margin:0; text-align:right; font-variant-numeric:tabular-nums}
   .sel-note{margin:6px 0 4px; font-size:12px; color:var(--mut); font-style:italic}
+  /* Schematic of whatever is selected: true relative radii, so it is a small
+     map of the thing rather than an icon of it. */
+  #sel-viz-wrap{padding:0 14px 10px}
+  #sel-viz{width:100%; height:auto; display:block; border:1px solid rgba(242,230,166,.16);
+    border-radius:3px; background:#03080a}
   canvas#sys{width:100%; height:auto; display:block; cursor:grab; touch-action:none;
     background:radial-gradient(closest-side, rgba(242,230,166,.05), transparent 70%)}
   canvas#sys.dragging{cursor:grabbing}
@@ -324,10 +329,9 @@
     <div class="card selected-card">
       <span class="pill">WHAT HAVE I SELECTED</span>
       <div class="body" id="p-selected"></div>
-    </div>
-    <div class="card">
-      <span class="pill">START HERE</span>
-      <div class="body" id="p-guide"></div>
+      <div class="body" id="sel-viz-wrap" hidden>
+        <canvas id="sel-viz" width="380" height="190"></canvas>
+      </div>
     </div>
     <div class="card">
       <span class="pill">COMMAND DECK</span>
@@ -364,6 +368,9 @@
     </div>
     <div id="section-contacts" class="drawer-section" hidden>
       <div class="card"><span class="pill">CONTACTS</span><div class="filterbar"><input id="contact-search" type="search" placeholder="find name, port, occupation…"></div><div class="body" id="p-contacts"></div></div>
+    </div>
+    <div id="section-tutorial" class="drawer-section" hidden>
+      <div class="card"><span class="pill">HOW TO TRADE</span><div class="body" id="p-tutorial"></div></div>
     </div>
     <div id="section-calendar" class="drawer-section" hidden>
       <div class="card"><span class="pill">CALENDAR</span><div class="body" id="p-calendar"></div></div>
@@ -432,12 +439,17 @@ function fitBaseScale(){
   BASE_SCALE = Math.min(W, H) / 2 / (maxA * OVERVIEW_MARGIN);
 }
 const PLANET_DISC_DIV = 60; // outermost ring distance, in planet display radii
-// Capped so the deepest moon system still fits the canvas at full zoom: the
-// outer ring of Tern is a=0.00373, and 0.00373 * BASE_SCALE(21.6) * 4200 = 338px
-// against a 340px half-height. Raising this let you zoom into a state where
-// the outer moon's orbit had run off screen and the view read as broken.
-const MAX_ZOOM = 4200;
+// Zoom has to go much deeper than "fit the system". PLANET_DISC_DIV puts the
+// planet's drawn disc at 1/60 of the outermost ring, so reaching a
+// screen-filling planet takes ~250000x, not the ~4000x that fits the rings.
+// bodyDisplayRadius used to cap the disc at 60px, which made everything past
+// the system fit a no-op: the planet stopped growing while the rings slid off
+// screen. Both bounds are now high enough to actually inspect a world.
+const MAX_ZOOM = 250000;
+const MAX_DISC_PX = 2000;
 const MIN_RING_PX = 5;       // below this a ring is a speck, not a structure
+// Beyond this a label counts as detached from its marker and gets a leader line.
+const LEADER_PX = 14;          // extra distance past the marker before we lead
 
 // --- Label placement --------------------------------------------------------
 // Every label on the canvas goes through ONE pass so they all share a single
@@ -448,8 +460,13 @@ const MIN_RING_PX = 5;       // below this a ring is a speck, not a structure
 // first slot that clears every placed box AND every marker anchor on the map,
 // and is dropped entirely when nothing fits. Selection always wins.
 const LABEL_SLOTS = [
-  [1, -0.28], [-1, -0.28], [1, 0.28], [-1, 0.28],
-  [0, -1], [0, 1], [1, 1], [-1, 1], [1, -1], [-1, -1],
+  // ring 1: tight against the marker, these are tried first
+  [1, -0.28, 1], [-1, -0.28, 1], [1, 0.28, 1], [-1, 0.28, 1],
+  [0, -1, 1], [0, 1, 1], [1, 1, 1], [-1, 1, 1], [1, -1, 1], [-1, -1, 1],
+  // ring 2: pushed further out, only when ring 1 is full. Anything placed here
+  // gets a leader line so it is still visibly attached to its marker.
+  [1, -0.5, 2], [-1, -0.5, 2], [1, 0.5, 2], [-1, 0.5, 2],
+  [0, -1.25, 2], [0, 1.25, 2], [1, 1.25, 2], [-1, 1.25, 2],
 ];
 const LABEL_PAD = 3;
 function labelFontPx(discPx){
@@ -459,7 +476,10 @@ function labelFontPx(discPx){
   return Math.max(8, Math.min(12, Math.round(discPx * 1.9)));
 }
 function labelBox(x, y, r, w, h, slot){
-  const gap = r + 5;
+  const ring = slot[2] || 1;
+  // Ring 1 sits just off the marker. Ring 2 pushes the text out by a clear gap
+  // so a long name cannot creep back onto its own dot.
+  const gap = r + (ring === 1 ? 5 : 13);
   const cx = x + slot[0] * gap;
   const cy = y + slot[1] * (gap + h * 0.5);
   const left = slot[0] < 0 ? cx - w : cx;
@@ -468,6 +488,12 @@ function labelBox(x, y, r, w, h, slot){
           tx:left, ty:cy + h * 0.36, align:slot[0] < 0 ? "right" : "left"};
 }
 const boxHits = (a, b) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+// Straight-line distance from the marker centre to the nearest point of the
+// label box. Anything past LEADER_PX has drifted far enough to need a leader.
+function boxGap(box, x, y){
+  return Math.hypot(Math.max(box.x0 - x, 0, x - box.x1),
+                    Math.max(box.y0 - y, 0, y - box.y1));
+}
 function placeLabels(cands){
   const placed = [];
   for(const c of cands){
@@ -498,6 +524,24 @@ function placeLabels(cands){
 function drawLabels(cands){
   const sorted = [...cands].sort((a, b) => (b.pri || 0) - (a.pri || 0));
   for(const {cand, box} of placeLabels(sorted)){
+    // A label that had to be pushed off its marker gets a leader line, so a
+    // crowded chart still shows unambiguously which marker each name belongs
+    // to. The threshold is measured PAST the marker's own radius: a label
+    // hugging the edge of a 335px planet disc is 348px from its centre and is
+    // exactly where it should be. Only displacement beyond the marker is drift.
+    const gap = boxGap(box, cand.x, cand.y);
+    if(gap > cand.r + LEADER_PX){
+      const nx = Math.max(box.x0, Math.min(cand.x, box.x1));
+      const ny = Math.max(box.y0, Math.min(cand.y, box.y1));
+      ctx.strokeStyle = tint(THEMES[themeName].mut, .75);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(nx, ny);
+      ctx.lineTo(nx + (box.tx < cand.x ? -2 : 2), ny + (box.ty < cand.y ? -3 : 3));
+      ctx.stroke();
+      ctx.fillStyle = tint(THEMES[themeName].mut, .75);
+      ctx.beginPath(); ctx.arc(cand.x, cand.y, 1.6, 0, Math.PI * 2); ctx.fill();
+    }
     ctx.font = `${cand.bold ? "bold " : ""}${cand.h}px sans-serif`;
     ctx.textAlign = box.align;
     ctx.textBaseline = "alphabetic";
@@ -583,9 +627,15 @@ function applyTheme(name){
   if(typeof draw === "function" && SNAP) draw();
 }
 
+function fmtZoom(z){
+  // Zoom now spans five orders of magnitude; "view 249873.4x" is unreadable.
+  if(z >= 10000) return (z / 1000).toFixed(z >= 100000 ? 0 : 1) + "k";
+  if(z >= 100) return z.toFixed(0);
+  return z.toFixed(1);
+}
 function updateViewChip(){
   const chip = document.getElementById("chip-view");
-  if(chip) chip.textContent = `view ${view.zoom.toFixed(1)}×`;
+  if(chip) chip.textContent = `view ${fmtZoom(view.zoom)}×`;
   const frameChip = document.getElementById("chip-frame");
   if(frameChip) frameChip.textContent = `frame: ${frameOrigin().label}`;
 }
@@ -1257,7 +1307,7 @@ function bodyDisplayRadius(body, drawScale){
   // the synchronous shell (5.6 Earth radii out in reality) so an elevator ring
   // does not sit inside its own planet.
   const extent = Math.max(childExtent, locationExtent);
-  return Math.max(3, Math.min(60, extent * drawScale / PLANET_DISC_DIV));
+  return Math.max(3, Math.min(MAX_DISC_PX, extent * drawScale / PLANET_DISC_DIV));
 }
 function drawGate(body, X, Y, labels){
   // A gate is not a world: no disc, no orbit ring of its own to imply scale.
@@ -1508,7 +1558,7 @@ function toggleStored(set, id, storageName){
   saveLocalSet(storageName, set);
   render();
 }
-const DRAWER_TITLES = {ledger:"LEDGER", body:"BODY / FRAME", ship:"SHIP", flight:"FLIGHT PLANNER", port:"MARKET", ops:"WATCH / ARRIVALS", contracts:"CONTRACTS", contacts:"CONTACTS", settings:"SETTINGS", report:"ARRIVAL REPORT", calendar:"CALENDAR"};
+const DRAWER_TITLES = {ledger:"LEDGER", body:"BODY / FRAME", ship:"SHIP", flight:"FLIGHT PLANNER", port:"MARKET", ops:"WATCH / ARRIVALS", contracts:"CONTRACTS", contacts:"CONTACTS", settings:"SETTINGS", report:"ARRIVAL REPORT", calendar:"CALENDAR", tutorial:"HOW TO TRADE"};
 let drawerSection = null;
 function openDrawer(section){
   drawerSection = section;
@@ -1522,6 +1572,148 @@ function closeDrawer(){ document.getElementById("detail-overlay").hidden = true;
 function selGrid(rows){
   return `<dl class="sel-grid">${rows.filter(Boolean)
     .map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("")}</dl>`;
+}
+const VIZ = {el:null, ctx:null, dpr:1};
+function viz(){
+  if(!VIZ.el){
+    VIZ.el = document.getElementById("sel-viz");
+    if(VIZ.el) VIZ.ctx = VIZ.el.getContext("2d");
+  }
+  return VIZ.ctx ? VIZ : null;
+}
+function drawSelectionViz(){
+  const v = viz();
+  const wrap = document.getElementById("sel-viz-wrap");
+  if(!v || !wrap) return;
+  const cssW = Math.max(240, Math.round(VIZ.el.getBoundingClientRect().width || 380));
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const Wv = Math.round(cssW * dpr), Hv = Math.round(Wv * 190 / 380);
+  if(VIZ.el.width !== Wv || VIZ.el.height !== Hv){ VIZ.el.width = Wv; VIZ.el.height = Hv; }
+  const c = v.ctx;
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const w = cssW, h = cssW * 190 / 380;
+  c.clearRect(0, 0, w, h);
+  c.fillStyle = "#03080a"; c.fillRect(0, 0, w, h);
+  const f = sel.focus;
+  if(!f){ wrap.hidden = true; return; }
+  wrap.hidden = false;
+  const straw = STRAW, royal = ROYAL;
+  const ink = THEMES[themeName].ink, mut = THEMES[themeName].mut;
+  const cx = w / 2, cy = h / 2;
+
+  if(f.kind === "ship"){ return vizShip(c, w, h, cx, cy, straw, royal, ink, mut); }
+
+  const loc = f.kind === "location" ? (SNAP.locations || []).find(l => l.id === f.id) : null;
+  const body = f.kind === "location" ? bodyById(loc && loc.body) : bodyById(f.id);
+  if(!body) return;
+  if(body.kind === "wormhole") return vizGate(c, w, h, cx, cy, straw, ink, mut);
+
+  // A moon is drawn as a dot on its true orbit around a big primary, because
+  // that is the thing worth seeing: where it is in its orbit, and how far out.
+  if(body.parent){
+    const parent = bodyById(body.parent);
+    const kids = (SNAP.bodies || []).filter(b => b.parent === parent.id);
+    const outer = Math.max(...kids.map(k => k.a), 0.0001);
+    const R = Math.min(w, h) * 0.36;
+    const s = R / outer;
+    c.fillStyle = straw;
+    c.beginPath(); c.arc(cx, cy, Math.max(4, parentPlanetDisc(parent, s)), 0, Math.PI * 2); c.fill();
+    c.fillStyle = mut; c.font = "9px sans-serif"; c.textAlign = "left";
+    c.fillText(parent.id.toUpperCase(), cx + 6, cy - 6);
+    for(const k of kids){
+      c.strokeStyle = k.id === body.id ? tint(royal, .8) : "rgba(242,230,166,.15)";
+      c.lineWidth = k.id === body.id ? 1.4 : 1;
+      c.beginPath(); c.arc(cx, cy, k.a * s, 0, Math.PI * 2); c.stroke();
+      const ang = bodyAngleOf(k);
+      const X = cx + Math.cos(ang) * k.a * s, Y = cy - Math.sin(ang) * k.a * s;
+      c.fillStyle = k.id === body.id ? royal : tint(ink, .45);
+      c.beginPath(); c.arc(X, Y, k.id === body.id ? 4 : 2, 0, Math.PI * 2); c.fill();
+    }
+    c.fillStyle = ink; c.font = "bold 10px sans-serif"; c.textAlign = "left";
+    c.fillText(body.id.toUpperCase() + " · " + body.a.toFixed(4) + " from " + parent.id.toUpperCase(), 6, 12);
+    return;
+  }
+
+  // A planet/moonless world: disc, moon orbits, and the orbital infrastructure.
+  const kids = (SNAP.bodies || []).filter(b => b.parent === body.id);
+  const rings = (SNAP.locations || []).filter(l => l.body === body.id && l.kind !== "surface");
+  const outer = Math.max(...kids.map(k => k.a), ...rings.map(l => l.orbit_a), 0.0001);
+  const R = Math.min(w, h) * 0.36;
+  const s = R / outer;
+  const discR = Math.max(3, outer * s / PLANET_DISC_DIV);
+  c.fillStyle = straw;
+  c.beginPath(); c.arc(cx, cy, discR, 0, Math.PI * 2); c.fill();
+  for(const l of rings){
+    c.strokeStyle = l.synchronous ? "rgba(242,230,166,.34)" : "rgba(242,230,166,.18)";
+    c.setLineDash(l.synchronous ? [] : [2, 3]); c.lineWidth = 1;
+    c.beginPath(); c.arc(cx, cy, l.orbit_a * s, 0, Math.PI * 2); c.stroke();
+    c.setLineDash([]);
+    const ang = l.orbit_angle || 0;
+    c.fillStyle = l.kind === "station" ? straw : royal;
+    c.fillRect(cx + Math.cos(ang) * l.orbit_a * s - 2, cy - Math.sin(ang) * l.orbit_a * s - 2, 4, 4);
+  }
+  for(const k of kids){
+    c.strokeStyle = tint(royal, .35); c.lineWidth = 1;
+    c.beginPath(); c.arc(cx, cy, k.a * s, 0, Math.PI * 2); c.stroke();
+    const ang = bodyAngleOf(k);
+    const X = cx + Math.cos(ang) * k.a * s, Y = cy - Math.sin(ang) * k.a * s;
+    const ph = SNAP.calendar && (SNAP.calendar.moons || []).find(m => m.id === k.id);
+    c.fillStyle = royal;
+    c.beginPath(); c.arc(X, Y, 3, 0, Math.PI * 2); c.fill();
+    if(ph){ c.fillStyle = mut; c.font = "8px sans-serif"; c.textAlign = "center";
+      c.fillText(moonPhaseGlyph(ph.fraction), X, Y - 6); }
+  }
+  c.fillStyle = ink; c.font = "bold 10px sans-serif"; c.textAlign = "left";
+  c.fillText(body.id.toUpperCase() + (kids.length ? " · " + kids.length + " moon" + (kids.length > 1 ? "s" : "") : " · no moons"), 6, 12);
+}
+function parentPlanetDisc(parent, s){
+  // Same disc rule as the main canvas, at this schematic's scale.
+  const kids = (SNAP.bodies || []).filter(b => b.parent === parent.id);
+  const rings = (SNAP.locations || []).filter(l => l.body === parent.id && l.kind !== "surface");
+  const extent = Math.max(...kids.map(k => k.a), ...rings.map(l => l.orbit_a), 0.0001);
+  return Math.max(3, extent * s / PLANET_DISC_DIV);
+}
+function bodyAngleOf(b){
+  const live = (DRAW_SNAP || SNAP).bodies.find(x => x.id === b.id);
+  return live ? live.angle : b.angle0;
+}
+function vizGate(c, w, h, cx, cy, straw, ink, mut){
+  c.strokeStyle = mut; c.lineWidth = 1.4;
+  for(let i=0;i<2;i++){
+    c.beginPath(); c.arc(cx, cy, 16 + i*7, 0.4 + i*0.5, 0.4 + i*0.5 + Math.PI*1.5); c.stroke();
+  }
+  c.fillStyle = straw;
+  c.beginPath(); c.arc(cx, cy, 4, 0, Math.PI*2); c.fill();
+  c.fillStyle = ink; c.font = "bold 10px sans-serif"; c.textAlign = "left";
+  c.fillText("GATE MOUTH · NO TRANSIT YET", 6, 12);
+}
+function vizShip(c, w, h, cx, cy, straw, royal, ink, mut){
+  const s = SNAP.ships.find(x => x.id === sel.focus.id) || SNAP.ships[0];
+  if(!s) return;
+  const bw = Math.min(200, w - 80), bh = 26, bx = (w - bw) / 2, by = 34;
+  c.strokeStyle = straw; c.lineWidth = 1.4;
+  c.strokeRect(bx, by, bw, bh);
+  c.fillStyle = tint(ink, .1); c.fillRect(bx, by, bw, bh);
+  const tonnes = Object.values(s.cargo || {}).reduce((a, b) => a + b, 0);
+  const fillW = Math.max(0, Math.min(1, tonnes / Math.max(1, s.cargo_cap))) * bw;
+  c.fillStyle = royal; c.fillRect(bx, by, fillW, bh);
+  // dv tank
+  const dy = by + bh + 16, dw = bw * Math.max(0, Math.min(1, s.dv / Math.max(0.001, s.dv_cap)));
+  c.strokeStyle = tint(mut, .8); c.lineWidth = 1;
+  c.strokeRect(bx, dy, bw, 8);
+  c.fillStyle = straw; c.fillRect(bx, dy, dw, 8);
+  c.fillStyle = ink; c.font = "9px sans-serif"; c.textAlign = "left";
+  c.fillText("HOLD " + tonnes.toFixed(0) + "/" + s.cargo_cap.toFixed(0) + "t", bx, by - 6);
+  c.fillText("DV " + s.dv.toFixed(3) + "/" + s.dv_cap.toFixed(2), bx, dy + 20);
+  if(s.leg){
+    c.fillStyle = mut;
+    c.fillText("IN TRANSIT → " + s.leg.to.toUpperCase() + " · " + s.eta_d.toFixed(1) + "d", bx, dy + 34);
+  }
+  const cargo = Object.entries(s.cargo || {});
+  c.textAlign = "left"; c.font = "9px sans-serif";
+  cargo.forEach(([k, q], i) => {
+    c.fillStyle = royal; c.fillText(k + " " + q.toFixed(0) + "t", bx, dy + 50 + i*11);
+  });
 }
 function helioDistanceOf(body){
   if(!body) return null;
@@ -1738,7 +1930,7 @@ function hudPanel(){
       <button class="hud-button" data-open="calendar">Calendar</button>
       <button class="hud-button" data-open="ledger">Log</button><button class="hud-button" data-open="ops">Watch</button>
       <button class="hud-button" data-open="contracts">Contracts</button><button class="hud-button" data-open="contacts">Contacts</button>
-      <button class="hud-button" data-open="settings">Settings</button><button class="hud-button" id="hud-help">Help</button></div>`;
+      <button class="hud-button" data-open="settings">Settings</button><button class="hud-button" data-open="tutorial">How to trade</button><button class="hud-button" id="hud-help">Help</button></div>`;
 }
 function activityPanel(){
   const tape = Object.entries(SNAP.ports || {}).flatMap(([port, book]) => Object.entries((book && book.last) || {})
@@ -1801,23 +1993,59 @@ function reportPanel(){
     ${ship && ship.at ? `<div class="preview">PC-1 is now at <b>${esc(ship.at)}</b>. ${port ? marketPulse(port) : ""}</div>` : ""}
     <div class="ctl"><button class="hud-button" data-report-open="port">Open market</button><button class="hud-button" data-report-open="flight">Plan next flight</button><button class="hud-button" data-report-close="true">Continue</button></div>`;
 }
-function guidePanel(){
+// Tutorial: real dialog steps, each keyed off actual game state rather than a
+// static card in the sidebar. Progress is derived, so it can never disagree
+// with the save.
+const TUTORIAL = [
+  {id:"welcome", title:"You are a merchant, not a pilot",
+   body:() => `Put capital somewhere, then wait. Every decision here is about <b>mass x delta-v x time</b> against what a thing is worth when it arrives — not about flying well.
+     <br><br>This campaign starts at <b>${esc(SNAP.ports[sel.port] ? sel.port : "Tide")}</b> with one hull and a small purse.`,
+   action:null},
+  {id:"select", title:"Read the map before you spend anything",
+   body:() => `Click any world, ship, or station. <b>What have I selected</b> reads it out and draws a schematic of it.
+     <br><br>Double-click a world, or press <b>F</b>, to fly the camera to its system. Scroll to zoom; it goes a very long way now.`,
+   action:"try_select"},
+  {id:"buy", title:"Buy on this world's book, not on faith",
+   body:() => `Every port has real <b>buyers</b> and <b>sellers</b> with quantities. Prices move with production and consumption, so a price you saw yesterday may be gone.
+     <br><br>The <b>Deal Scanner</b> in the market panel lists the widest cross-port margins — and clicking one plans the flight for you.`,
+   action:"open_port"},
+  {id:"route", title:"Windows are the whole game",
+   body:() => `Plan a flight and you will see a <b>wait</b>, a <b>transit</b>, and a <b>delta-v</b> cost. Departures are phase-gated: leaving now costs far more fuel than waiting for the window.
+     <br><br>Waiting is a capital decision. So is arriving.`,
+   action:"open_flight"},
+  {id:"arrive", title:"Arriving is the payoff",
+   body:() => `When you dock, an <b>Arrival Report</b> opens with everything that moved while you were gone. The ledger keeps the last 50 events — check it before you buy.
+     <br><br>Refuel at a station or elevator terminal. Elevator terminals are in <b>synchronous orbit</b>, which is why they are so cheap.`,
+   action:"show_ledger"},
+  {id:"time", title:"Time is the scarce resource",
+   body:() => `The clock at the top is a real calendar — zodiac months, planetary weekdays, and live moon phases. Advancing is free; arriving late is not.
+     <br><br><b>Auto 1d/min</b> runs a game-day a real minute. Leave it on and check the morning.`,
+   action:"open_calendar"},
+  {id:"free", title:"You are free now",
+   body:() => `The rest is compounding. Contacts build rapport, contracts pay better than spot trades, and the gate beyond Fulmaior is the next thing on the horizon.
+     <br><br>Everything is reachable from the <b>Command Deck</b>. Press <b>Ctrl/Cmd+K</b> for the command palette.`,
+   action:null},
+];
+let TUTORIAL_STEP = 0;
+function tutorialDone(){
   const s = SNAP.ships.find(x => x.id === sel.ship) || SNAP.ships[0];
-  if(!s) return "<span class='dim'>no ship</span>";
-  const cargo = Object.keys(s.cargo || {}).length;
-  if(s.leg){
-    return `<div class="rowline"><span class="cname">STEP 3 · IN TRANSIT</span><span class="badge royal">${s.eta_d.toFixed(0)}d</span></div>
-      <div class="tape">PC-1 is travelling to ${esc(s.leg.to)}. Nothing needs your attention until it arrives.</div>
-      <div class="ctl"><button class="btn small" id="guide-action">Advance to arrival</button></div>`;
-  }
-  if(cargo){
-    return `<div class="rowline"><span class="cname">STEP 2 · CHOOSE A ROUTE</span><span class="tape">${cargo} commodity type${cargo === 1 ? "" : "s"} aboard</span></div>
-      <div class="tape">Pick a destination, preview the time and fuel cost, then commit the flight.</div>
-      <div class="ctl"><button class="btn small" id="guide-action">Preview a route</button></div>`;
-  }
-  return `<div class="rowline"><span class="cname">STEP 1 · BUY SOMETHING</span><span class="tape">${esc(SNAP.ports[sel.port] ? sel.port : "no port")}</span></div>
-    <div class="tape">Start in the PORT panel: choose a commodity and tonnes, then buy it.</div>
-    <div class="ctl"><button class="btn small" id="guide-action">Go to market</button></div>`;
+  return !!(s && (s.cargo && Object.keys(s.cargo).length) && !s.leg && (SNAP.ledger || []).length > 1);
+}
+function tutorialPanel(){
+  const total = TUTORIAL.length;
+  const step = TUTORIAL[Math.min(TUTORIAL_STEP, total - 1)];
+  const done = tutorialDone();
+  return `<div class="rowline"><span class="cname">${esc(step.title)}</span><span class="tape">${TUTORIAL_STEP + 1} / ${total}</span></div>
+    <div class="preview">${step.body()}</div>
+    <div class="ctl">
+      <button class="hud-button" id="tut-prev"${TUTORIAL_STEP === 0 ? " disabled" : ""}>Back</button>
+      <button class="hud-button" id="tut-next">${TUTORIAL_STEP === total - 1 ? "Done" : "Next"}</button>
+      ${step.action ? `<button class="hud-button" id="tut-do">Try it</button>` : ""}
+      <button class="hud-button" id="tut-restart">Restart</button>
+    </div>
+    <div class="tape">PROGRESS</div>
+    ${TUTORIAL.map((t, i) => `<div class="rowline"><span class="cname" style="opacity:${i <= TUTORIAL_STEP ? 1 : 0.45}">${i < TUTORIAL_STEP ? "✓" : "·"} ${esc(t.title)}</span></div>`).join("")}
+    ${done ? `<div class="sel-note">You have traded and arrived — you know the loop. Hide this with <b>Help</b>.</div>` : ""}`;
 }
 function bodyPanel(){
   const body = bodyById(sel.body);
@@ -2102,12 +2330,14 @@ function render(){
   bodyJump.innerHTML = bodyOptions(sel.body);
   bodyJump.value = sel.body;
   document.getElementById("p-selected").innerHTML = selectionPanel();
-  document.getElementById("p-guide").innerHTML = guidePanel();
+  drawSelectionViz();
   document.getElementById("p-hud").innerHTML = hudPanel();
   document.getElementById("p-activity").innerHTML = activityPanel();
   document.getElementById("p-settings").innerHTML = settingsPanel();
   document.getElementById("p-report").innerHTML = reportPanel();
   document.getElementById("p-calendar").innerHTML = calendarPanel();
+  document.getElementById("p-tutorial").innerHTML = tutorialPanel();
+  wireTutorial();
   document.getElementById("p-body").innerHTML = bodyPanel();
   document.getElementById("p-ship").innerHTML = shipPanel();
   document.getElementById("p-flight").innerHTML = flightPanel();
@@ -2169,20 +2399,35 @@ function render(){
   if(settingsJump) settingsJump.onchange = e => { if(e.target.value){ selectHit({kind:"body", id:e.target.value}); closeDrawer(); enterSystemView(); } };
   const settingsReset = document.getElementById("settings-reset");
   if(settingsReset) settingsReset.onclick = () => { if(confirm("Reset the live game? This replaces the current campaign save.")){ closeDrawer(); act("reset", {}); } };
-  const guideAction = document.getElementById("guide-action");
-  if(guideAction) guideAction.onclick = () => {
-    const ship = SNAP.ships.find(x => x.id === sel.ship) || SNAP.ships[0];
-    if(!ship) return;
-    if(ship.leg){ nextEvent(); return; }
-    if(Object.keys(ship.cargo || {}).length){
-      const dest = document.getElementById("c-dest");
-      if(dest) plotOrbit(ship, dest.value);
-    } else {
-      if(SNAP.ports[ship.at]) sel.port = ship.at;
-      render();
-      document.getElementById("p-port")?.scrollIntoView({behavior:"smooth", block:"nearest"});
+  function wireTutorial(){
+  const prev = document.getElementById("tut-prev");
+  const next = document.getElementById("tut-next");
+  const doIt = document.getElementById("tut-do");
+  const restart = document.getElementById("tut-restart");
+  if(prev) prev.onclick = () => { TUTORIAL_STEP = Math.max(0, TUTORIAL_STEP - 1); render(); };
+  if(restart) restart.onclick = () => { TUTORIAL_STEP = 0; render(); };
+  if(next) next.onclick = () => {
+    if(TUTORIAL_STEP >= TUTORIAL.length - 1){ closeDrawer(); return; }
+    TUTORIAL_STEP++; render();
+  };
+  if(doIt) doIt.onclick = () => {
+    const act0 = TUTORIAL[TUTORIAL_STEP].action;
+    if(act0 === "try_select"){
+      closeDrawer();
+      toast("Click a world, ship, or station on the map — the card above will read it out");
+    } else if(act0 === "open_port"){
+      const ship = SNAP.ships.find(x => x.id === sel.ship) || SNAP.ships[0];
+      if(ship && SNAP.ports[ship.at]) sel.port = ship.at;
+      openDrawer("port");
+    } else if(act0 === "open_flight"){
+      openDrawer("flight");
+    } else if(act0 === "show_ledger"){
+      openDrawer("ledger");
+    } else if(act0 === "open_calendar"){
+      openDrawer("calendar");
     }
   };
+}
   const bodyBookmark = document.getElementById("body-bookmark");
   if(bodyBookmark) bodyBookmark.onclick = () => toggleStored(BOOKMARKS, sel.body, "bookmarks");
   const portWatch = document.getElementById("port-watch");

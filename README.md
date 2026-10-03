@@ -102,14 +102,56 @@ fixture data only — `state.build_alpha_phocae()` (hot inner world, temperate
 middle, cold outer, one moon) so the shape of a second system is already
 decided. Wiring the crossing is the next step, not this one.
 
-### Reading the canvas
+### Zooming, labels, and the selection schematic
+
+**Zoom goes five orders of magnitude**, because `PLANET_DISC_DIV` puts a planet's
+drawn disc at 1/60 of its outermost ring — filling the screen with a planet needs
+~250000×, not the ~3200× that fits its moons. `MAX_ZOOM` is 250000 and
+`MAX_DISC_PX` is 2000; both were previously far too tight (4200 and **60**), which
+made everything past the system fit a no-op: the planet stopped growing at 60px
+while its rings slid off screen. Verified: Tern goes from a 4.3px dot at system
+fit to a 335px disc at full zoom. `fmtZoom` renders that as `250k×` rather than
+`249873.4×`.
+
+**Labels** are placed by one pass sharing one collision space, and a label that
+has to be displaced now gets a **leader line** so it stays visibly attached to
+its marker. Two placement rings: ring 1 hugs the marker, ring 2 is pushed out far
+enough that a long name cannot creep back onto its own dot. The leader threshold
+is measured **past the marker's radius** (`gap > r + LEADER_PX`), not absolutely
+— a label hugging the edge of a 335px planet disc is 348px from its centre and is
+exactly where it should be; only displacement beyond the marker is drift.
+Measured: 0 collisions at every zoom from 1× to 250000×, with leaders appearing
+only where the inner planets really are crammed (CROWN and SKYHOOK in the
+overview).
+
+**What have I selected** carries a schematic canvas, not just text, drawn to true
+relative radii so it is a small map of the thing rather than an icon of it:
+
+- **world** — disc, moon orbits, moons at their live angle with a phase glyph,
+  station/terminal rings (the synchronous one solid, stations dashed) with their
+  markers at true angle
+- **moon** — a dot on its true orbit around a big primary, which is the thing
+  worth seeing: where it is and how far out
+- **ship** — hull schematic with hold fill, delta-v gauge, and cargo manifest
+- **location** — its parent with the location's own orbit ring
+- **gate** — the aperture rings
+
+### The tutorial
+
+`START HERE` is gone from the sidebar. It was a three-state static card keyed off
+"is the hold empty"; it is now a proper **How to trade** dialog with seven steps,
+Back/Next/Restart, a progress list, and a **Try it** button per step that opens
+the relevant dialog (market, flight planner, ledger, calendar). Each step is a
+lazy function so it can read live state. `tutorialDone()` derives completion from
+the save — traded and arrived — so progress can never disagree with the game.
+Reachable from the Command Deck and the command palette.
 
 **What have I selected** is the top card in the right rail and the primary
 readout: click a world, a ship, or an orbital location and it reports that
 thing. `sel.focus` records *what was pointed at* — separate from
 `sel.body`/`sel.ship`/`sel.location`, which are the derived camera and panel
 context. Without it, clicking a ship parked at Tern is indistinguishable from
-clicking Tern itself.
+clicking Tern itself. It also carries the schematic canvas described above.
 
 **Labels** all go through one placement pass (`placeLabels`/`drawLabels`) and
 therefore share a single collision space. Candidates are sorted by priority
@@ -135,7 +177,7 @@ Markers scale logarithmically and stay smaller than the world they mark: station
 3.3px, terminal 2.8px, against a 4.3px planet disc at Tern's fitted zoom. They
 used to be `3.5·√zoom` clamped at 10px — a 10px square on a 9px orbit.
 
-### Zooming
+### Zoom feel
 
 The heliocentric view and a moon system are ~3200× apart. Three things make that
 span usable:
@@ -148,16 +190,16 @@ span usable:
 - **Fitting a system eases** over ~520ms, interpolating zoom in log space.
   Fitting Tern is a 3000× move; done instantly it read as a cut. Any direct
   gesture (wheel, pan, pinch) cancels an in-flight move.
-- **`MAX_ZOOM` is 4200**, chosen so the *deepest* mooned system still fits the
-  canvas at full zoom (Tern's outer ring is 338px against a 340px half-canvas).
-  Shallower systems can be zoomed past, which is ordinary map behaviour.
+- **`MAX_ZOOM` is 250000** so you can inspect a world rather than only frame it.
+  Past the system fit the moon orbits leave the frame, which is ordinary map
+  behaviour; the planet keeps growing, which is the point.
 
 **The canvas backing store matches the element** at `devicePixelRatio` and draws
 through a `PX` transform, with a `ResizeObserver` catching size changes the window
 `resize` event misses. It was previously a fixed 860×680 stretched to ~1401px on
 this display — every frame upscaled ~1.6×, which is why zooming looked soft.
 
-### Selection
+### Selection internals
 
 **What have I selected** is the top card in the right rail and the primary
 readout: click a world, a ship, or an orbital location and it reports that

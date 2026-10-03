@@ -107,47 +107,86 @@ def test_label_halo_does_not_bloom():
 
 def test_zoom_is_adaptive_and_bounded():
     """The helio view and a moon system are ~3200x apart; a constant wheel rate
-    needed ~81 notches to cross that, and MAX_ZOOM used to allow zooming to a
-    state where the outer ring had run off canvas.
+    needed ~81 notches to cross that, and an earlier level-snapping rate was
+    jerky (2.3x jumps then a 0.7% dead notch).
 
-    The guarantee to hold: the DEEPEST mooned system (the one needing the
-    largest fit zoom) must be both reachable and still entirely on canvas at
-    full zoom. Shallower systems may be zoomed past -- that is ordinary map
-    behaviour -- but the deepest one can never be zoomed into a broken view.
+    Zoom must also go MUCH deeper than "fit the system". The planet's drawn disc
+    is 1/PLANET_DISC_DIV of the outermost ring, so filling the screen with a
+    planet needs ~250000x, and the disc cap used to be 60px -- which made
+    everything past the system fit a no-op: the planet stopped growing while the
+    rings slid off screen.
     """
     _html, script = script_and_markup()
     assert "function wheelZoomStep(" in script, "missing wheel zoom plumbing"
-    # The level-snapping version was jerky (2.3x jumps then a 0.7% dead notch);
-    # the rate must be a smooth monotonic function of zoom, with no snapping.
     assert "nextZoomLevel" not in script, "level-snapping zoom returned; it was jerky"
     assert "applyWheelZoom" not in script, "snap-to-level zoom returned; it was jerky"
-    m = re.search(r"const MAX_ZOOM = (\d+)", script)
-    assert m, "MAX_ZOOM not found"
-    max_zoom = int(m.group(1))
+
+    max_zoom = int(re.search(r"const MAX_ZOOM = (\d+)", script).group(1))
+    assert max_zoom >= 100000, (
+        f"MAX_ZOOM {max_zoom} cannot reach a screen-filling planet; the disc is "
+        f"1/PLANET_DISC_DIV of the outermost ring")
+    disc_div = int(re.search(r"const PLANET_DISC_DIV = (\d+)", script).group(1))
+    disc_cap = int(re.search(r"const MAX_DISC_PX = (\d+)", script).group(1))
+    assert disc_cap >= 2000, f"disc cap {disc_cap}px clips planets before MAX_ZOOM"
 
     sys.path.insert(0, os.path.join(HERE, ".."))
     from sim.state import build_sol
     bodies = build_sol().bodies
-    half_canvas = 680 / 2          # canvas logical height
-    fill = 0.38                    # systemZoomFor fills 38% of the short edge
-    base_scale = half_canvas / (15.0 * 1.05)   # fitBaseScale: min(W,H)/2 / outer body
+    base_scale = (680 / 2) / (15.0 * 1.05)
 
-    systems = {}
+    deepest = None
     for planet in (b for b in bodies.values() if not b.parent):
         extent = max((b.a for b in bodies.values() if b.parent == planet.id), default=0.0)
-        if extent > 0:
-            systems[planet.id] = (extent, fill * 2 * half_canvas / (extent * base_scale))
-    assert systems, "no mooned systems found in the fixture"
+        if extent <= 0:
+            continue
+        disc = extent * base_scale * max_zoom / disc_div
+        if deepest is None or disc > deepest[1]:
+            deepest = (planet.id, disc)
+    assert deepest, "no mooned systems in the fixture"
+    assert deepest[1] >= 300, (
+        f"{deepest[0]} disc only reaches {deepest[1]:.0f}px at MAX_ZOOM; zooming in "
+        f"still shows nothing to inspect")
 
-    deepest_id = max(systems, key=lambda k: systems[k][1])
-    extent, fit = systems[deepest_id]
-    assert fit <= max_zoom, (
-        f"{deepest_id} needs {fit:.0f}x to fit but MAX_ZOOM is {max_zoom}: its system "
-        f"can never be fully framed")
-    ring_at_max = extent * base_scale * max_zoom
-    assert ring_at_max <= half_canvas + 4, (
-        f"at MAX_ZOOM the {deepest_id} system outer ring is {ring_at_max:.0f}px against a "
-        f"{half_canvas:.0f}px half-canvas: zooming in breaks the view")
+
+def test_start_here_is_a_dialog_not_a_sidebar_card():
+    """The static START HERE card became a real tutorial dialog with steps."""
+    html, script = script_and_markup()
+    assert 'id="p-guide"' not in html, "START HERE sidebar card is back"
+    assert 'id="section-tutorial"' in html, "tutorial dialog section missing"
+    assert 'id="p-tutorial"' in html, "tutorial panel missing"
+    assert "const TUTORIAL = [" in script, "tutorial steps missing"
+    for fn in ("function tutorialPanel()", "function wireTutorial(", "function tutorialDone()"):
+        assert fn in script, f"missing tutorial plumbing: {fn}"
+    steps = re.search(r"const TUTORIAL = \[(.*?)\n\];", script, re.S)
+    assert steps and steps.group(1).count('id:"') >= 5, "tutorial needs real steps"
+
+
+def test_selection_card_has_a_schematic():
+    """'What have I selected' draws a diagram of the thing, not just text."""
+    html, script = script_and_markup()
+    assert 'id="sel-viz"' in html, "selection schematic canvas missing"
+    for fn in ("function drawSelectionViz(", "function vizShip(", "function vizGate("):
+        assert fn in script, f"missing schematic renderer: {fn}"
+    assert "sel.focus" in script, "schematic does not follow the selection"
+    assert "drawSelectionViz()" in script, "schematic is never drawn"
+
+
+def test_detached_labels_get_leaders():
+    """A label pushed off its marker must show a leader, or a crowded chart
+    reads as names floating near the wrong thing."""
+    _html, script = script_and_markup()
+    assert "const LEADER_PX" in script, "LEADER_PX threshold missing"
+    assert "function boxGap(" in script, "boxGap missing"
+    assert "boxGap(box, cand.x, cand.y)" in script, "leader distance not measured"
+    # Threshold must be relative to the marker radius: a label hugging a 335px
+    # planet disc is ~348px from its centre and is correctly placed there.
+    assert "gap > cand.r + LEADER_PX" in script, \
+        "leader threshold must be measured past the marker radius, not absolutely"
+    slots = re.search(r"const LABEL_SLOTS = \[(.*?)\];", script, re.S).group(1)
+    # Each slot carries a ring number; ring 1 hugs the marker, ring 2 is pushed
+    # out far enough that it needs a leader.
+    assert slots.count(", 1]") >= 8, f"expected a tight first ring, got {slots.count(', 1]')}"
+    assert slots.count(", 2]") >= 6, f"expected a second, further-out ring, got {slots.count(', 2]')}"
 
 
 def test_markers_scale_below_their_world():
@@ -177,6 +216,9 @@ if __name__ == "__main__":
         ("labels_single_pass", test_labels_go_through_one_placement_pass),
         ("label_halo_clean", test_label_halo_does_not_bloom),
         ("zoom_adaptive_bounded", test_zoom_is_adaptive_and_bounded),
+        ("tutorial_dialog", test_start_here_is_a_dialog_not_a_sidebar_card),
+        ("selection_schematic", test_selection_card_has_a_schematic),
+        ("label_leaders", test_detached_labels_get_leaders),
         ("markers_scale", test_markers_scale_below_their_world),
         ("canvas_resolution", test_canvas_matches_display_resolution),
     ]
