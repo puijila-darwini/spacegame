@@ -148,17 +148,68 @@ def test_zoom_is_adaptive_and_bounded():
         f"still shows nothing to inspect")
 
 
-def test_start_here_is_a_dialog_not_a_sidebar_card():
-    """The static START HERE card became a real tutorial dialog with steps."""
+def test_tutorial_is_a_mode_reachable_from_the_title_screen():
+    """START HERE went away; the tutorial is a real mode entered from the front.
+
+    It must be an overlay that spotlights the live UI and advances on real
+    player actions -- not a static dialog that only describes things.
+    """
     html, script = script_and_markup()
     assert 'id="p-guide"' not in html, "START HERE sidebar card is back"
-    assert 'id="section-tutorial"' in html, "tutorial dialog section missing"
-    assert 'id="p-tutorial"' in html, "tutorial panel missing"
-    assert "const TUTORIAL = [" in script, "tutorial steps missing"
-    for fn in ("function tutorialPanel()", "function wireTutorial(", "function tutorialDone()"):
-        assert fn in script, f"missing tutorial plumbing: {fn}"
-    steps = re.search(r"const TUTORIAL = \[(.*?)\n\];", script, re.S)
-    assert steps and steps.group(1).count('id:"') >= 5, "tutorial needs real steps"
+    assert 'id="section-tutorial"' not in html, "tutorial is a dialog again"
+    assert 'id="title-tutorial"' in html, "no tutorial entry on the title screen"
+    # The coach overlay and its three parts.
+    for el in ('id="tut-scrim"', 'id="tut-spot"', 'id="tut-card"'):
+        assert el in html, f"missing coach overlay part: {el}"
+    # The scrim must NOT eat clicks, or the player cannot perform the action.
+    assert "pointer-events:none" in html, "scrim would block the real UI"
+    for fn in ("function enterTutorial(", "function exitTutorial(", "function tutShow(",
+               "function tutTick(", "function tutGo(", "function wireTutorialChrome("):
+        assert fn in script, f"missing tutorial mode plumbing: {fn}"
+    assert "const TUT_STEPS = [" in script, "tutorial steps missing"
+    steps = re.search(r"const TUT_STEPS = \[(.*?)\n\];", script, re.S)
+    assert steps and steps.group(1).count('id:"') >= 8, "tutorial needs real steps"
+    # Steps must gate on player actions, not just render text.
+    assert steps.group(1).count("gate:") >= 8, "steps must be gated on real actions"
+    # It must spotlight real UI elements.
+    assert steps.group(1).count("target:") >= 8, "steps should spotlight real UI"
+    assert "tutTarget()" in script and "getBoundingClientRect" in script
+    assert 'tutorial-enter' in script and 'tutorial-leave' in script
+    # And it must run from the title screen AND the command deck.
+    assert 'hud-open-tut' in script, "no tutorial entry in the command deck"
+
+
+def test_tutorial_sandbox_never_touches_a_campaign():
+    """Tutorial mode swaps the live save path. The campaign must come back
+    byte-identical, or a player who tries the tutorial loses their game."""
+    sys.path.insert(0, os.path.join(HERE, ".."))
+    from web.server import Store
+    import tempfile
+    tmp = tempfile.mkdtemp(prefix="tut-gate-")
+    live = os.path.join(tmp, "live.json")
+    store = Store(live)
+    store.game.credits = 4242.0
+    store.game.t = 77.0
+    store._save()
+
+    store.enter_tutorial()
+    assert store.tutorial is True
+    assert store.path != live, "tutorial must use its own save path"
+    assert store.game.captain == "Trainee"
+    # Do something destructive in the sandbox.
+    store.game.credits = 99999.0
+    store.game.t = 5.0
+    store._save()
+
+    store.leave_tutorial()
+    assert store.tutorial is False
+    assert store.path == live, "campaign save path not restored"
+    assert store.game.credits == 4242.0, "campaign credits were clobbered"
+    assert store.game.t == 77.0, "campaign clock was clobbered"
+    # And the sandbox resumes independently.
+    store.enter_tutorial()
+    assert store.game.credits == 99999.0, "tutorial did not resume its own save"
+    store.leave_tutorial()
 
 
 def test_selection_card_has_a_schematic():
@@ -216,7 +267,8 @@ if __name__ == "__main__":
         ("labels_single_pass", test_labels_go_through_one_placement_pass),
         ("label_halo_clean", test_label_halo_does_not_bloom),
         ("zoom_adaptive_bounded", test_zoom_is_adaptive_and_bounded),
-        ("tutorial_dialog", test_start_here_is_a_dialog_not_a_sidebar_card),
+        ("tutorial_mode", test_tutorial_is_a_mode_reachable_from_the_title_screen),
+        ("tutorial_sandbox", test_tutorial_sandbox_never_touches_a_campaign),
         ("selection_schematic", test_selection_card_has_a_schematic),
         ("label_leaders", test_detached_labels_get_leaders),
         ("markers_scale", test_markers_scale_below_their_world),

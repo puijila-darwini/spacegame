@@ -78,6 +78,26 @@
   .sel-grid dt{color:var(--mut); font-size:11px; letter-spacing:1px; text-transform:uppercase; white-space:nowrap}
   .sel-grid dd{margin:0; text-align:right; font-variant-numeric:tabular-nums}
   .sel-note{margin:6px 0 4px; font-size:12px; color:var(--mut); font-style:italic}
+  /* Tutorial coach */
+  #tut-scrim{position:fixed; inset:0; background:rgba(2,6,9,.55); z-index:60; pointer-events:none}
+  #tut-spot{position:fixed; z-index:61; pointer-events:none; border-radius:4px;
+    box-shadow:0 0 0 2px var(--straw), 0 0 22px 6px rgba(242,230,166,.30);
+    transition:all .18s ease}
+  #tut-card{position:fixed; z-index:62; width:min(430px, calc(100vw - 24px));
+    background:#03121a; border:1px solid var(--straw-dim, rgba(242,230,166,.4));
+    border-left:3px solid var(--straw); border-radius:3px 12px 3px 12px;
+    padding:12px 14px; box-shadow:0 12px 34px rgba(0,0,0,.6)}
+  .tut-head{display:flex; align-items:baseline; gap:8px; margin-bottom:6px}
+  #tut-stepno{font-size:10px; letter-spacing:2px; color:var(--mut); text-transform:uppercase; white-space:nowrap}
+  #tut-title{font-size:15px; font-weight:700; color:var(--straw)}
+  .tut-body{font-size:13px; line-height:1.5; color:var(--ink)}
+  .tut-body b{color:var(--straw)}
+  .tut-foot{margin-top:10px}
+  .tut-rail{display:flex; gap:4px; margin-bottom:8px}
+  .tut-rail i{flex:1; height:3px; background:rgba(242,230,166,.18); border-radius:2px}
+  .tut-rail i.done{background:var(--straw)}
+  .tut-rail i.now{background:var(--royal)}
+
   /* Schematic of whatever is selected: true relative radii, so it is a small
      map of the thing rather than an icon of it. */
   #sel-viz-wrap{padding:0 14px 10px}
@@ -247,10 +267,12 @@
     <div class="title-menu">
       <button class="title-btn primary" id="title-continue">CONTINUE CAMPAIGN</button>
       <button class="title-btn" id="title-new">NEW GAME</button>
+      <button class="title-btn" id="title-tutorial">TUTORIAL</button>
       <button class="title-btn" id="title-load">LOAD GAME</button>
       <button class="title-btn" id="title-save">SAVE GAME</button>
       <button class="title-btn" id="title-settings">SETTINGS</button>
     </div>
+    <p class="title-sub" id="title-tutorial-note" hidden>Apprentice Run — a sandbox. Your campaign is never touched.</p>
     <div class="title-panel" id="title-new-panel" hidden>
       <h2>NEW CAMPAIGN</h2>
       <div class="title-field"><label for="new-captain">Captain name</label><input id="new-captain" value="Commander" maxlength="32"></div>
@@ -369,9 +391,6 @@
     <div id="section-contacts" class="drawer-section" hidden>
       <div class="card"><span class="pill">CONTACTS</span><div class="filterbar"><input id="contact-search" type="search" placeholder="find name, port, occupation…"></div><div class="body" id="p-contacts"></div></div>
     </div>
-    <div id="section-tutorial" class="drawer-section" hidden>
-      <div class="card"><span class="pill">HOW TO TRADE</span><div class="body" id="p-tutorial"></div></div>
-    </div>
     <div id="section-calendar" class="drawer-section" hidden>
       <div class="card"><span class="pill">CALENDAR</span><div class="body" id="p-calendar"></div></div>
     </div>
@@ -389,6 +408,24 @@
 <div class="toast-stack" id="toast-stack"></div>
 <div class="diagnostic" id="diagnostic-panel" hidden></div>
 <p class="foot" id="foot">Drop a snapshot.json anywhere on this page, or serve the live backend.</p>
+<!-- Tutorial coach: a non-blocking scrim plus a spotlight ring on the real UI
+     element, so the player performs the actual action instead of reading about
+     it. The scrim is pointer-events:none for exactly that reason. -->
+<div id="tut-scrim" hidden></div>
+<div id="tut-spot" hidden></div>
+<div id="tut-card" role="dialog" aria-label="Tutorial" aria-live="polite" hidden>
+  <div class="tut-head"><span id="tut-stepno">step</span><span id="tut-title"></span></div>
+  <div class="tut-body" id="tut-body"></div>
+  <div class="tut-foot">
+    <div class="tut-rail" id="tut-rail"></div>
+    <div class="ctl">
+      <button class="hud-button" id="tut-skip">Skip step</button>
+      <button class="hud-button" id="tut-restart2">Restart</button>
+      <button class="hud-button" id="tut-leave">Exit tutorial</button>
+      <button class="hud-button" id="tut-next2">Next</button>
+    </div>
+  </div>
+</div>
 <script>
 "use strict";
 let SNAP = null, LIVE = false, PREVIEW = "", QUOTE = "", AUTO_ENABLED = false;
@@ -969,6 +1006,20 @@ function initTitle(){
   document.getElementById("title-theme").value = themeName;
   titleStatus("Ready.");
   document.getElementById("title-continue").onclick = continueGame;
+  document.getElementById("title-tutorial").onclick = () => enterTutorial(true);
+  // If a tutorial sandbox save exists, say so — the player may have quit
+  // mid-tutorial and should know the campaign is waiting safely.
+  (async () => {
+    try {
+      const r = await fetch("/api/saves", {cache:"no-store"});
+      if(!r.ok) return;
+      const j = await r.json();
+      if((j.saves || []).some(s => s.slot === "autosave" && /tutorial/i.test(s.label))){
+        document.getElementById("title-tutorial").textContent = "RESUME TUTORIAL";
+        document.getElementById("title-tutorial-note").hidden = false;
+      }
+    } catch(e){}
+  })();
   document.getElementById("title-new").onclick = () => showTitlePanel("new");
   document.getElementById("title-load").onclick = () => { showTitlePanel("load"); showLoadSlots(); };
   document.getElementById("title-save").onclick = () => showTitlePanel("save");
@@ -1930,7 +1981,7 @@ function hudPanel(){
       <button class="hud-button" data-open="calendar">Calendar</button>
       <button class="hud-button" data-open="ledger">Log</button><button class="hud-button" data-open="ops">Watch</button>
       <button class="hud-button" data-open="contracts">Contracts</button><button class="hud-button" data-open="contacts">Contacts</button>
-      <button class="hud-button" data-open="settings">Settings</button><button class="hud-button" data-open="tutorial">How to trade</button><button class="hud-button" id="hud-help">Help</button></div>`;
+      <button class="hud-button" data-open="settings">Settings</button>${TUT.active ? `<button class="hud-button" id="hud-exit-tut">Exit tutorial</button>` : `<button class="hud-button" id="hud-open-tut">Tutorial</button>`}<button class="hud-button" id="hud-help">Help</button></div>`;
 }
 function activityPanel(){
   const tape = Object.entries(SNAP.ports || {}).flatMap(([port, book]) => Object.entries((book && book.last) || {})
@@ -1993,59 +2044,169 @@ function reportPanel(){
     ${ship && ship.at ? `<div class="preview">PC-1 is now at <b>${esc(ship.at)}</b>. ${port ? marketPulse(port) : ""}</div>` : ""}
     <div class="ctl"><button class="hud-button" data-report-open="port">Open market</button><button class="hud-button" data-report-open="flight">Plan next flight</button><button class="hud-button" data-report-close="true">Continue</button></div>`;
 }
-// Tutorial: real dialog steps, each keyed off actual game state rather than a
-// static card in the sidebar. Progress is derived, so it can never disagree
-// with the save.
-const TUTORIAL = [
-  {id:"welcome", title:"You are a merchant, not a pilot",
-   body:() => `Put capital somewhere, then wait. Every decision here is about <b>mass x delta-v x time</b> against what a thing is worth when it arrives — not about flying well.
-     <br><br>This campaign starts at <b>${esc(SNAP.ports[sel.port] ? sel.port : "Tide")}</b> with one hull and a small purse.`,
-   action:null},
-  {id:"select", title:"Read the map before you spend anything",
-   body:() => `Click any world, ship, or station. <b>What have I selected</b> reads it out and draws a schematic of it.
-     <br><br>Double-click a world, or press <b>F</b>, to fly the camera to its system. Scroll to zoom; it goes a very long way now.`,
-   action:"try_select"},
-  {id:"buy", title:"Buy on this world's book, not on faith",
-   body:() => `Every port has real <b>buyers</b> and <b>sellers</b> with quantities. Prices move with production and consumption, so a price you saw yesterday may be gone.
-     <br><br>The <b>Deal Scanner</b> in the market panel lists the widest cross-port margins — and clicking one plans the flight for you.`,
-   action:"open_port"},
-  {id:"route", title:"Windows are the whole game",
-   body:() => `Plan a flight and you will see a <b>wait</b>, a <b>transit</b>, and a <b>delta-v</b> cost. Departures are phase-gated: leaving now costs far more fuel than waiting for the window.
-     <br><br>Waiting is a capital decision. So is arriving.`,
-   action:"open_flight"},
+// --- Tutorial mode ----------------------------------------------------------
+// A real mode, not a dialog: it runs on a sandbox game (the server swaps the
+// live save path, so a player's campaign file is never touched), spotlights the
+// actual UI element for each step, and advances when the player PERFORMS the
+// action rather than when they read about it. Progress lives in the sandbox
+// save, so it survives a reload and can be resumed from the title screen.
+const TUT = {active:false, step:0, lastGate:null};
+const TUT_KEY = "sol-merchant-tutorial-step";
+const TUT_STEPS = [
+  {id:"intro", title:"You are a merchant, not a pilot",
+   body:`You are here to put capital somewhere and wait. Every decision is <b>mass x delta-v x time</b> against what a thing is worth when it arrives.
+     <br><br>This is the <b>Apprentice Run</b>: a sandbox. Nothing you do here touches a real campaign, and you can start over at any point.`,
+   target:null, gate:()=>true, manual:true},
+  {id:"select", title:"Click a world",
+   body:`Click any world on the map. <b>What have I SELECTED</b> will read it out and draw a schematic of it.
+     <br><br>Try Tern — it has the moons.`,
+   target:"canvas#sys", gate:()=>!!(sel.focus && sel.focus.kind === "body")},
+  {id:"schematic", title:"That little diagram is a map, not an icon",
+   body:`It is drawn at <b>true relative radii</b>, so a moon really is far outside its planet. Station rings sit inside the synchronous shell; elevator terminals orbit <b>synchronously</b>, which is why they are so cheap.
+     <br><br>Now scroll to zoom in.`,
+   target:"#sel-viz-wrap", gate:()=>view.zoom > 8},
+  {id:"market", title:"Open this port's book",
+   body:`Every port has real buyers and sellers with quantities. Prices move with production and consumption, so yesterday's price may be gone.
+     <br><br>The <b>Deal Scanner</b> lists the widest cross-port margins.`,
+   target:'[data-open="port"]', gate:()=>drawerSection === "port"},
+  {id:"buy", title:"Buy something",
+   body:`Pick a commodity and tonnes, then buy. You start with a small purse — the discipline is the point, not the size.
+     <br><br>Check the <b>Day</b> at the top: the calendar is real.`,
+   target:"#c-comm", gate:()=>!!(SNAP.ships[0] && Object.keys(SNAP.ships[0].cargo || {}).length)},
+  {id:"plan", title:"Plan a flight",
+   body:`Closing the market, plan a route. You will see a <b>wait</b>, a <b>transit</b>, and a <b>delta-v</b> cost.
+     <br><br>Departures are phase-gated. Leaving now costs far more fuel than waiting for the window.`,
+   target:'[data-open="flight"]', gate:()=>drawerSection === "flight"},
+  {id:"preview", title:"Read the window before you commit",
+   body:`The preview is the whole game in one line. A long wait is cheap fuel; a short wait is expensive.
+     <br><br>Pick a destination with a decent spread and commit.`,
+   target:"#p-flight", gate:()=>PREVIEW.length > 0 || !!(SNAP.ships[0] && SNAP.ships[0].leg)},
+  {id:"commit", title:"Commit",
+   body:`Delta-v is spent now and refilled later, at a station. If you run dry you are stuck.
+     <br><br>Watch the arrival estimate, then advance the clock to get there.`,
+   target:"#c-go", gate:()=>!!(SNAP.ships[0] && SNAP.ships[0].leg)},
   {id:"arrive", title:"Arriving is the payoff",
-   body:() => `When you dock, an <b>Arrival Report</b> opens with everything that moved while you were gone. The ledger keeps the last 50 events — check it before you buy.
-     <br><br>Refuel at a station or elevator terminal. Elevator terminals are in <b>synchronous orbit</b>, which is why they are so cheap.`,
-   action:"show_ledger"},
-  {id:"time", title:"Time is the scarce resource",
-   body:() => `The clock at the top is a real calendar — zodiac months, planetary weekdays, and live moon phases. Advancing is free; arriving late is not.
-     <br><br><b>Auto 1d/min</b> runs a game-day a real minute. Leave it on and check the morning.`,
-   action:"open_calendar"},
-  {id:"free", title:"You are free now",
-   body:() => `The rest is compounding. Contacts build rapport, contracts pay better than spot trades, and the gate beyond Fulmaior is the next thing on the horizon.
-     <br><br>Everything is reachable from the <b>Command Deck</b>. Press <b>Ctrl/Cmd+K</b> for the command palette.`,
-   action:null},
+   body:`An <b>Arrival Report</b> opens with everything that moved while you were gone. The ledger keeps the last 50 events — check it before you buy.
+     <br><br>Then sell what you carried, and do it again with more capital.`,
+   target:'[data-open="ledger"]', gate:()=>!!(SNAP.ships[0] && !SNAP.ships[0].leg && SNAP.t > 0)},
+  {id:"calendar", title:"Know what day it is",
+   body:`Zodiac months, planetary weekdays, live moon phases, and the next conjunction. Advancing time is free; arriving late is not.
+     <br><br>Turn on <b>Auto 1d/min</b> and check the morning.`,
+   target:'[data-open="calendar"]', gate:()=>drawerSection === "calendar"},
+  {id:"outro", title:"You know the loop",
+   body:`Buy on a real book, wait for a window, arrive, sell. Contacts and contracts build from there, and the gate beyond Fulmaior is the next thing on the horizon.
+     <br><br><b>Exit the tutorial</b> to return to your campaign. Everything you learned applies there.`,
+   target:null, gate:()=>true, manual:true},
 ];
-let TUTORIAL_STEP = 0;
-function tutorialDone(){
-  const s = SNAP.ships.find(x => x.id === sel.ship) || SNAP.ships[0];
-  return !!(s && (s.cargo && Object.keys(s.cargo).length) && !s.leg && (SNAP.ledger || []).length > 1);
+function tutStep(){ return TUT_STEPS[Math.min(TUT.step, TUT_STEPS.length - 1)]; }
+function tutGatePasses(step){
+  try { return step.gate(SNAP); } catch(e){ return false; }
 }
-function tutorialPanel(){
-  const total = TUTORIAL.length;
-  const step = TUTORIAL[Math.min(TUTORIAL_STEP, total - 1)];
-  const done = tutorialDone();
-  return `<div class="rowline"><span class="cname">${esc(step.title)}</span><span class="tape">${TUTORIAL_STEP + 1} / ${total}</span></div>
-    <div class="preview">${step.body()}</div>
-    <div class="ctl">
-      <button class="hud-button" id="tut-prev"${TUTORIAL_STEP === 0 ? " disabled" : ""}>Back</button>
-      <button class="hud-button" id="tut-next">${TUTORIAL_STEP === total - 1 ? "Done" : "Next"}</button>
-      ${step.action ? `<button class="hud-button" id="tut-do">Try it</button>` : ""}
-      <button class="hud-button" id="tut-restart">Restart</button>
-    </div>
-    <div class="tape">PROGRESS</div>
-    ${TUTORIAL.map((t, i) => `<div class="rowline"><span class="cname" style="opacity:${i <= TUTORIAL_STEP ? 1 : 0.45}">${i < TUTORIAL_STEP ? "✓" : "·"} ${esc(t.title)}</span></div>`).join("")}
-    ${done ? `<div class="sel-note">You have traded and arrived — you know the loop. Hide this with <b>Help</b>.</div>` : ""}`;
+function tutTarget(){
+  const step = tutStep();
+  if(!step.target) return null;
+  return document.querySelector(step.target);
+}
+function tutShow(){
+  const scrim = document.getElementById("tut-scrim");
+  const spot = document.getElementById("tut-spot");
+  const card = document.getElementById("tut-card");
+  if(!TUT.active || !SNAP || document.getElementById("title-screen").hidden === false){
+    scrim.hidden = true; spot.hidden = true; card.hidden = true;
+    return;
+  }
+  scrim.hidden = false;
+  const step = tutStep();
+  document.getElementById("tut-stepno").textContent = `step ${TUT.step + 1} of ${TUT_STEPS.length}`;
+  document.getElementById("tut-title").textContent = step.title;
+  document.getElementById("tut-body").innerHTML = step.body;
+  document.getElementById("tut-next2").hidden = !!step.manual;
+  document.getElementById("tut-skip").hidden = !!step.manual;
+  const rail = document.getElementById("tut-rail");
+  rail.innerHTML = TUT_STEPS.map((s, i) =>
+    `<i class="${i < TUT.step ? "done" : i === TUT.step ? "now" : ""}" title="${esc(s.title)}"></i>`).join("");
+
+  const el = tutTarget();
+  if(el){
+    const r = el.getBoundingClientRect();
+    spot.hidden = false;
+    spot.style.left = (r.left - 5) + "px";
+    spot.style.top = (r.top - 5) + "px";
+    spot.style.width = (r.width + 10) + "px";
+    spot.style.height = (r.height + 10) + "px";
+    // Prefer below the target; flip above when there is no room.
+    const cw = Math.min(430, window.innerWidth - 24);
+    const ch = card.offsetHeight || 190;
+    let top = r.bottom + 12;
+    if(top + ch > window.innerHeight - 12) top = Math.max(12, r.top - ch - 12);
+    let left = Math.min(Math.max(12, r.left), window.innerWidth - cw - 12);
+    card.hidden = false;
+    card.style.left = left + "px";
+    card.style.top = top + "px";
+  } else {
+    spot.hidden = true;
+    card.hidden = false;
+    card.style.left = Math.max(12, (window.innerWidth - 430) / 2) + "px";
+    card.style.top = Math.max(12, (window.innerHeight - (card.offsetHeight || 200)) / 2) + "px";
+  }
+}
+function tutTick(){
+  if(!TUT.active) return;
+  const step = tutStep();
+  if(!tutGatePasses(step)) return;
+  if(TUT.lastGate === step.id) return;
+  TUT.lastGate = step.id;
+  if(step.manual) return;
+  if(TUT.step < TUT_STEPS.length - 1){
+    TUT.step++;
+    try { localStorage.setItem(TUT_KEY, String(TUT.step)); } catch(e){}
+    toast("Step complete");
+    render();
+  }
+}
+function tutGo(delta){
+  TUT.step = Math.max(0, Math.min(TUT_STEPS.length - 1, TUT.step + delta));
+  TUT.lastGate = null;
+  try { localStorage.setItem(TUT_KEY, String(TUT.step)); } catch(e){}
+  render();
+}
+async function enterTutorial(fresh){
+  try {
+    if(fresh) await titleRequest("tutorial-enter", {});
+    else await titleRequest("tutorial-enter", {});
+    TUT.active = true;
+    TUT.step = 0;
+    TUT.lastGate = null;
+    try { localStorage.removeItem(TUT_KEY); } catch(e){}
+    enterGame();
+    toast("Tutorial sandbox — your campaign is untouched");
+  } catch(e){ titleStatus("Could not start the tutorial: " + e.message); }
+}
+async function exitTutorial(){
+  TUT.active = false;
+  try { localStorage.removeItem(TUT_KEY); } catch(e){}
+  document.getElementById("tut-card").hidden = true;
+  document.getElementById("tut-scrim").hidden = true;
+  document.getElementById("tut-spot").hidden = true;
+  try {
+    await titleRequest("tutorial-leave", {});
+    location.reload();
+  } catch(e){ titleStatus("Could not leave the tutorial: " + e.message); }
+}
+function wireTutorialChrome(){
+  if(wireTutorialChrome.done) return;
+  wireTutorialChrome.done = true;
+  document.getElementById("tut-next2").onclick = () => tutGo(1);
+  document.getElementById("tut-skip").onclick = () => tutGo(1);
+  document.getElementById("tut-restart2").onclick = async () => {
+    await titleRequest("tutorial-enter", {});
+    await act("reset", {});
+    TUT.step = 0; TUT.lastGate = null;
+    try { localStorage.removeItem(TUT_KEY); } catch(e){}
+    render();
+  };
+  document.getElementById("tut-leave").onclick = exitTutorial;
+  window.addEventListener("resize", tutShow);
 }
 function bodyPanel(){
   const body = bodyById(sel.body);
@@ -2336,8 +2497,6 @@ function render(){
   document.getElementById("p-settings").innerHTML = settingsPanel();
   document.getElementById("p-report").innerHTML = reportPanel();
   document.getElementById("p-calendar").innerHTML = calendarPanel();
-  document.getElementById("p-tutorial").innerHTML = tutorialPanel();
-  wireTutorial();
   document.getElementById("p-body").innerHTML = bodyPanel();
   document.getElementById("p-ship").innerHTML = shipPanel();
   document.getElementById("p-flight").innerHTML = flightPanel();
@@ -2347,6 +2506,12 @@ function render(){
   document.getElementById("p-ledger").innerHTML = ledgerPanel();
   document.getElementById("p-contacts").innerHTML = contactPanel();
   wireLive();
+  wireTutorialChrome();
+  const hudTut = document.getElementById("hud-open-tut");
+  if(hudTut) hudTut.onclick = () => enterTutorial(true);
+  const hudExit = document.getElementById("hud-exit-tut");
+  if(hudExit) hudExit.onclick = exitTutorial;
+  if(TUT.active){ tutTick(); tutShow(); }
   const bodyFocus = document.getElementById("body-focus");
   if(bodyFocus) bodyFocus.onclick = enterSystemView;
   document.querySelectorAll("[data-open]").forEach(button => {
@@ -2399,36 +2564,7 @@ function render(){
   if(settingsJump) settingsJump.onchange = e => { if(e.target.value){ selectHit({kind:"body", id:e.target.value}); closeDrawer(); enterSystemView(); } };
   const settingsReset = document.getElementById("settings-reset");
   if(settingsReset) settingsReset.onclick = () => { if(confirm("Reset the live game? This replaces the current campaign save.")){ closeDrawer(); act("reset", {}); } };
-  function wireTutorial(){
-  const prev = document.getElementById("tut-prev");
-  const next = document.getElementById("tut-next");
-  const doIt = document.getElementById("tut-do");
-  const restart = document.getElementById("tut-restart");
-  if(prev) prev.onclick = () => { TUTORIAL_STEP = Math.max(0, TUTORIAL_STEP - 1); render(); };
-  if(restart) restart.onclick = () => { TUTORIAL_STEP = 0; render(); };
-  if(next) next.onclick = () => {
-    if(TUTORIAL_STEP >= TUTORIAL.length - 1){ closeDrawer(); return; }
-    TUTORIAL_STEP++; render();
-  };
-  if(doIt) doIt.onclick = () => {
-    const act0 = TUTORIAL[TUTORIAL_STEP].action;
-    if(act0 === "try_select"){
-      closeDrawer();
-      toast("Click a world, ship, or station on the map — the card above will read it out");
-    } else if(act0 === "open_port"){
-      const ship = SNAP.ships.find(x => x.id === sel.ship) || SNAP.ships[0];
-      if(ship && SNAP.ports[ship.at]) sel.port = ship.at;
-      openDrawer("port");
-    } else if(act0 === "open_flight"){
-      openDrawer("flight");
-    } else if(act0 === "show_ledger"){
-      openDrawer("ledger");
-    } else if(act0 === "open_calendar"){
-      openDrawer("calendar");
-    }
-  };
-}
-  const bodyBookmark = document.getElementById("body-bookmark");
+    const bodyBookmark = document.getElementById("body-bookmark");
   if(bodyBookmark) bodyBookmark.onclick = () => toggleStored(BOOKMARKS, sel.body, "bookmarks");
   const portWatch = document.getElementById("port-watch");
   if(portWatch) portWatch.onclick = () => toggleStored(WATCHLIST, sel.port, "watchlist");

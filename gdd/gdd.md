@@ -283,7 +283,28 @@ phase and conjunction are surfaced as readouts only. Wiring tides to port
 throughput, or conjunction to a market event, is a design decision and belongs
 to the owner — see open decisions.
 
-## 26. Open decisions
+## 26. The tutorial is a mode, and it is sandboxed (owner delta 2026-10-03)
+
+`START HERE` is removed. The tutorial is entered from the title screen or the
+Command Deck and runs as a **mode**, on a sandbox: the server swaps the live game
+*and its save path* for `tutorial.json`, holding the campaign in memory. A
+player's campaign file is never read or written while they learn, so an
+interrupted tutorial cannot destroy it — the failure mode that would make players
+afraid to try the tutorial at all.
+
+Design rules that came out of actually playing it:
+
+- **Steps gate on performed actions, never on reading.** Each step spotlights the
+  real UI element and completes when the player does the thing. A tutorial that
+  advances while you read is a manual with a spotlight on it.
+- **The scrim must be `pointer-events:none`.** Otherwise the coach blocks the
+  very click the step is asking for, which is the classic guided-tour failure.
+- **Gates must be forgiving of alternate routes.** The "read the window" step
+  gated on the preview variable, which only one button sets, so a player who
+  committed directly was stuck on it permanently. It now also passes if the ship
+  is already in transit. This was only visible by playing it.
+
+## 27. Open decisions
 
 - **Should the calendar have teeth?** Moon phase (32.7d synodic for Moon) and
   the 72-day Moon/Tide conjunction are real, derived, and currently readouts.

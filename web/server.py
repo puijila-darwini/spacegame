@@ -66,6 +66,11 @@ class Store:
         self.slot_dir = slots or os.path.join(os.path.dirname(path) or ".", "slots")
         self.lock = threading.Lock()
         self.auto_enabled = os.environ.get("SPACEGAME_AUTO") == "1"
+        # Tutorial mode is a SANDBOX: it swaps in a second game and its own save
+        # path, so a player's campaign file is never touched while they learn.
+        # `_campaign` holds the real campaign while the tutorial is active.
+        self.tutorial = False
+        self._campaign = None
         try:
             self.game = persist.load(path)
         except (FileNotFoundError, ValueError, KeyError):
@@ -75,6 +80,40 @@ class Store:
     def _save(self) -> None:
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
         persist.save(self.game, self.path)
+
+    @property
+    def tutorial_path(self) -> str:
+        return os.path.join(os.path.dirname(self.path) or ".", "tutorial.json")
+
+    def enter_tutorial(self) -> dict:
+        """Swap the live game for a sandbox and start (or resume) the tutorial.
+
+        The campaign is held in memory only. Its save file is not written and
+        not read, so an interrupted tutorial cannot lose it.
+        """
+        if not self.tutorial:
+            self._campaign = (self.game, self.path)
+        self.path = self.tutorial_path
+        try:
+            self.game = persist.load(self.path)
+        except (FileNotFoundError, ValueError, KeyError):
+            self.game = fresh_game(captain="Trainee", campaign="Apprentice Run",
+                                   company="Apprentice Co.", ship_name="Cadet",
+                                   difficulty="story")
+            self.game.ledger.append({"t": 0.0, "kind": "event",
+                                     "msg": "Apprentice Run begins — a sandbox. Your campaign is untouched."})
+            self._save()
+        self.tutorial = True
+        return {"tutorial": True, "t": self.game.t}
+
+    def leave_tutorial(self) -> dict:
+        """Put the real campaign back, save-file and all."""
+        if self._campaign is not None:
+            self.game, self.path = self._campaign
+            self._campaign = None
+        self.tutorial = False
+        self._save()
+        return {"tutorial": False, "t": self.game.t}
 
     @staticmethod
     def _valid_slot(slot: str) -> str:
@@ -98,7 +137,8 @@ class Store:
                 "ship": ship.get("name", "PC-1")}
 
     def list_saves(self) -> list:
-        saves = [self._save_meta(persist.to_dict(self.game), "autosave", "Current campaign")]
+        label = "Tutorial sandbox" if self.tutorial else "Current campaign"
+        saves = [self._save_meta(persist.to_dict(self.game), "autosave", label)]
         try:
             names = sorted(os.listdir(self.slot_dir))
         except FileNotFoundError:
@@ -139,7 +179,9 @@ class Store:
 
     def snapshot(self) -> dict:
         with self.lock:
-            return api.snapshot(self.game)
+            snap = api.snapshot(self.game)
+            snap["tutorial"] = self.tutorial
+            return snap
 
     def act(self, name: str, p: dict):
         with self.lock:
@@ -152,6 +194,10 @@ class Store:
                 return self.load_slot(p.get("slot", ""))
             if name == "delete-save":
                 return self.delete_slot(p.get("slot", ""))
+            if name == "tutorial-enter":
+                return self.enter_tutorial()
+            if name == "tutorial-leave":
+                return self.leave_tutorial()
             if name == "new":
                 self.game = fresh_game(p.get("captain", "Commander"),
                                        p.get("difficulty", "balanced"),

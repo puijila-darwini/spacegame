@@ -16,7 +16,7 @@ Then open <http://192.168.1.38:8765/> from another device on the LAN, or <http:/
 
 The server exposes a JSON API under `/api/` and saves the campaign to `~/ai/tmp/spacegame/live.json` by default. Set `SPACEGAME_SAVE` to change the save path, `SPACEGAME_HOST` to change the bind address, or `SPACEGAME_AUTO=1` to advance one game day per real minute.
 
-The game opens on a title screen with `Continue`, `New Game`, `Load Game`, `Save Game`, and `Settings`. New campaigns collect a captain name, company, first-ship name, campaign name, and difficulty — you start with one hull free, and it is the anchor for the whole arc. Blank company/ship fields fall back to `"<Captain>'s Company"` and `"Wayfarer"`. Saves are real named slots with metadata and offline-safe campaign state. Once in a campaign, market, ship, log, contacts, contracts, and settings open as centered modal dialogs rather than permanent dashboard panels.
+The game opens on a title screen with `Continue`, `New Game`, `Tutorial`, `Load Game`, `Save Game`, and `Settings`. **Tutorial** is a full guided mode, not a help page: it runs in a sandbox that swaps the live save path, so your campaign is never touched — see *Tutorial mode* below. New campaigns collect a captain name, company, first-ship name, campaign name, and difficulty — you start with one hull free, and it is the anchor for the whole arc. Blank company/ship fields fall back to `"<Captain>'s Company"` and `"Wayfarer"`. Saves are real named slots with metadata and offline-safe campaign state. Once in a campaign, market, ship, log, contacts, contracts, and settings open as centered modal dialogs rather than permanent dashboard panels.
 
 ## Interface controls
 
@@ -136,15 +136,45 @@ relative radii so it is a small map of the thing rather than an icon of it:
 - **location** — its parent with the location's own orbit ring
 - **gate** — the aperture rings
 
-### The tutorial
+### Tutorial mode
 
-`START HERE` is gone from the sidebar. It was a three-state static card keyed off
-"is the hold empty"; it is now a proper **How to trade** dialog with seven steps,
-Back/Next/Restart, a progress list, and a **Try it** button per step that opens
-the relevant dialog (market, flight planner, ledger, calendar). Each step is a
-lazy function so it can read live state. `tutorialDone()` derives completion from
-the save — traded and arrived — so progress can never disagree with the game.
-Reachable from the Command Deck and the command palette.
+`START HERE` is gone entirely. The tutorial is now a **mode**, entered from the
+**title screen** (`TUTORIAL` between New Game and Load) or from the Command Deck.
+
+**It is a sandbox.** The server swaps the live game *and its save path* for a
+separate `tutorial.json`, holding the real campaign in memory
+(`Store.enter_tutorial` / `leave_tutorial`). A player's campaign file is never
+read or written while they learn, so an interrupted tutorial cannot lose it —
+and quitting mid-tutorial just resumes, which is why the title button becomes
+`RESUME TUTORIAL` when a sandbox save exists. Leaving restores the campaign
+byte-identically; `test_page.py::tutorial_sandbox_never_touches_a_campaign`
+proves it by wrecking the sandbox and asserting the campaign still reads
+`credits == 4242.0, t == 77.0`.
+
+**Steps gate on real actions, not on reading.** Each step spotlights the actual
+UI element (`target:`) and completes when the player *performs* it:
+
+| step | gate |
+|---|---|
+| click a world | `sel.focus.kind === "body"` |
+| read the schematic | `view.zoom > 8` |
+| open the market | `drawerSection === "port"` |
+| buy something | the hold is non-empty |
+| plan a flight | `drawerSection === "flight"` |
+| read the window | `PREVIEW` set **or** already in transit |
+| commit | the ship has a leg |
+| arrive | no leg and the clock has moved |
+| open the calendar | `drawerSection === "calendar"` |
+
+The coach is a scrim plus a spotlight ring on the real element. **The scrim is
+`pointer-events:none` on purpose** — if it ate clicks the player could not perform
+the action the step is asking for. The card flips above the target when there is
+no room below, and a rail of 11 pips shows progress.
+
+One flaw caught by playing it rather than reading it: the "read the window" gate
+was `PREVIEW.length > 0`, which only the Preview button sets — so a player who
+committed directly was stuck on that step forever. It now also passes if the
+ship is already in transit.
 
 **What have I selected** is the top card in the right rail and the primary
 readout: click a world, a ship, or an orbital location and it reports that
